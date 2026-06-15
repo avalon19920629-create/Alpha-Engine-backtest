@@ -47,3 +47,15 @@ python alpha_engine_backtest.py --start 2015-01-01 --end 2026-06-15 --rebalance 
 ```
 
 Live mode は yfinance と外部ネットワークの可用性に依存します。現在の構成銘柄を過去にも適用するため生存者バイアスがあり、上場廃止・銘柄変更・過去の指数構成を完全には再現しません。また、企業行動の調整、欠損、配信元の訂正など価格データ品質にも限界があります。結果は調査用途であり、取引判断には追加検証が必要です。
+
+## Core + Alpha Integration Backtest
+
+L.U.M.U.S.-8 Core と point-in-time `Alpha_Always` を比較し、10〜15%補助枠としての価値を監査します。
+
+```bash
+python core_alpha_integration_backtest.py --start 2015-01-01 --end 2026-06-15 --core-weights config/lumus8_core_weights.csv --output-dir artifacts/core_alpha
+```
+
+`config/lumus8_core_weights.csv` は Core のティッカーと比率を定義し、合計は必ず1.0にしてください。初期値は正式比率を仮定しない全ゼロであるため、実行前に利用者が設定する必要があります。`CASH` は日次0%リターンとして扱います。
+
+出力先には summary、年次/月次リターン、ドローダウン、資産曲線、回転率、Core比較、選定履歴、およびMarkdown監査レポートが生成されます。Alpha側には現在ユニバース由来の生存者バイアスがあり、Core結果は設定ファイルの比率に依存します。本機能は投資助言ではなく、自動売買・自動売却・自動配分変更には接続しません。

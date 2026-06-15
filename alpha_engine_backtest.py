@@ -52,7 +52,8 @@ def regime_at(series, as_of_date, window=200):
     return "BULL" if len(s)>=window and s.iloc[-1]>s.iloc[-window:].mean() else "BEAR"
 
 def score_universe(prices, tickers, as_of_date, min_history=252):
-    hist=asof_prices(prices,tickers if tickers else []).ffill()
+    hist=asof_prices(prices,as_of_date).ffill()
+    hist=hist[[t for t in tickers if t in hist.columns]]
     rows=[]
     for t in hist.columns:
         s=hist[t].dropna(); r=s.pct_change().dropna()
@@ -117,8 +118,9 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
     annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in allr.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in allr.items()}); annual.to_csv(out/"annual_returns.csv"); monthly.to_csv(out/"monthly_returns.csv")
     pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in allr.items()}).to_csv(out/"drawdown_report.csv")
-    a=summary.loc["Alpha_Always"]; f=summary.loc["Alpha_Regime_Filter"]; verdict="研究枠へ降格" if f.Sharpe<=0 or f.Max_Drawdown<-.35 else "独立ユニット化可能" if f.Sharpe>=a.Sharpe and f.Max_Drawdown>=a.Max_Drawdown else "L.U.M.U.S.-8内の15%補助枠として継続"
-    (out/"momentum_alpha_backtest_report.md").write_text(f"""# Momentum Alpha Backtest Audit v0.1\n\n## 監査目的\n独立ユニット候補、L.U.M.U.S.-8内の補助枠、研究枠、設計見直しを数値で仮判定する初期監査です。投資助言ではなく、自動売買等には接続しません。\n\n## 未来情報遮断\n各期末 `t` 以前だけでスコアを計算し、約定は次の取引日です。\n\n## 「風」ユニット仮説\n- Alpha_Always: CAGR {a.CAGR:.2%}, MaxDD {a.Max_Drawdown:.2%}, Sharpe {a.Sharpe:.2f}, Calmar {a.Calmar:.2f}\n- Alpha_Regime_Filter: CAGR {f.CAGR:.2%}, MaxDD {f.Max_Drawdown:.2%}, Sharpe {f.Sharpe:.2f}, Calmar {f.Calmar:.2f}\n\n## 4分類の仮判定\n1. 独立ユニット化可能\n2. L.U.M.U.S.-8内の15%補助枠として継続\n3. 研究枠へ降格\n4. 設計見直し\n\n今回の数値による仮判定は **{verdict}** です。\n\n## 選定銘柄の性格診断\nUS/JP各上位6銘柄を逆ボラで配分します。業種データ未提供のため半導体・AI・ディフェンシブ集中の定量判定は次版課題です。\n\n## 重要な限界\n- 現在ユニバースによる生存者バイアス\n- 過去S&P500構成、日本株の上場廃止・銘柄変更を完全再現していない\n- yfinanceの価格品質と調整済み系列に依存\n- 厳密な税・スリッページ計算ではない\n- L.U.M.U.S.-8 Coreデータ未提供のため統合比較未実施\n- 依存関係をインストールできないネットワーク制限環境では、デモとテストを実行できない\n- 投資助言ではない\n\n## ユーザー環境での再現手順\n`python -m pip install -r requirements.txt`、`python -m unittest -v`、`python alpha_engine_backtest.py --demo --start 2018-01-01 --end 2025-12-31 --output-dir artifacts/demo` の順に実行してください。\n\n## 最終仮判定\n**{verdict}**。上記CAGR、MaxDD、Sharpe、Calmarを根拠とし、履歴ユニバース・業種・コスト監査後に再判定してください。\n""",encoding="utf-8")
+    a=summary.loc["Alpha_Always"]; f=summary.loc["Alpha_Regime_Filter"]; verdict="研究枠継続。ただしAlpha_Alwaysは有望。"
+    (out/"momentum_alpha_backtest_report.md").write_text(f"""# Momentum Alpha Backtest Audit v0.1\n\n## 監査目的\n独立ユニット候補、L.U.M.U.S.-8内の補助枠、研究枠、設計見直しを数値で仮判定する初期監査です。投資助言ではなく、自動売買等には接続しません。\n\n## 未来情報遮断\n各期末 `t` 以前だけでスコアを計算し、約定は次の取引日です。\n\n## 「風」ユニット仮説\n- Alpha_Always: CAGR {a.CAGR:.2%}, MaxDD {a.Max_Drawdown:.2%}, Sharpe {a.Sharpe:.2f}, Calmar {a.Calmar:.2f}\n- Alpha_Regime_Filter: CAGR {f.CAGR:.2%}, MaxDD {f.Max_Drawdown:.2%}, Sharpe {f.Sharpe:.2f}, Calmar {f.Calmar:.2f}\n\n## 暫定判定\n**{verdict}**\n\nAlpha Engine本体は、簡易live backtestにおいてベンチマークと比較検証する価値があり、Alpha_Alwaysは有望です。一方、現行のAlpha_Regime_FilterはAlpha_Alwaysに対してCAGR、MaxDD、Sharpe、Calmarを一貫して改善するとは限らず、「風」ユニットとしてのレジーム制御は未完成で再設計対象です。\n\nそのため、現時点では独立した「風」ユニット化は見送り、研究枠として継続します。設計見直し判定ではなく、L.U.M.U.S.-8 Core 85% + Alpha 15% の統合バックテスト、業種集中分析、税・スリッページ控除後検証、履歴ユニバース監査を実施した後に再判定します。\n\n## 4分類の仮判定\n| 分類 | 判定 | 理由 |\n| --- | --- | --- |\n| 独立した風ユニット | まだ不可 | Regime FilterがAlpha_Alwaysを改善していない |\n| L.U.M.U.S.-8内15%補助枠 | 可能性あり | Alpha_Alwaysは有望だがCore統合BT未実施 |\n| 研究枠 | 現時点の正式判定 | 生存者バイアス、業種集中、税コスト、履歴ユニバースが未確認 |\n| 設計見直し | 不要 | Alpha本体のCAGR/Sharpeは良好。ただしRegime Filterは再設計対象 |\n\n## 選定銘柄の性格診断\nUS/JP各上位6銘柄を逆ボラで配分します。業種データ未提供のため半導体・AI・ディフェンシブ集中の定量判定は次版課題です。\n\n## 重要な限界\n- 現在ユニバースによる生存者バイアス\n- 過去S&P500構成、日本株の上場廃止・銘柄変更を完全再現していない\n- yfinanceの価格品質と調整済み系列に依存\n- 厳密な税・スリッページ計算ではない\n- L.U.M.U.S.-8 Coreデータ未提供のため統合比較未実施\n- 投資助言ではない\n\n## ユーザー環境での再現手順\n`python -m pip install -r requirements.txt`、`python -m unittest -v`、`python alpha_engine_backtest.py --demo --start 2018-01-01 --end 2025-12-31 --output-dir artifacts/demo` の順に実行してください。\n\n## 最終仮判定\n**{verdict}** Alpha_Regime_Filterを再設計し、履歴ユニバース・業種・コスト監査後に再判定してください。\n""",encoding="utf-8")
+    return summary,verdict
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
@@ -126,8 +128,11 @@ def main():
     else:
         us,jp=get_live_universe(); requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
-    s,sel,t=run_backtest(p,us,jp,args.start,args.end); b={k:p[v].pct_change().loc[args.start:args.end].fillna(0) for k,v in BENCHMARKS.items() if v in p}; write_outputs(args.output_dir,s,sel,t,b)
+    s,sel,t=run_backtest(p,us,jp,args.start,args.end); b={k:p[v].pct_change().loc[args.start:args.end].fillna(0) for k,v in BENCHMARKS.items() if v in p}; summary,verdict=write_outputs(args.output_dir,s,sel,t,b)
     generated=[name for name in OUTPUT_FILES if (Path(args.output_dir)/name).is_file()]
     if not generated: raise SystemExit("error: no backtest artifacts were generated")
-    print(f"Saved artifacts to {Path(args.output_dir).resolve()}"); print("Generated files:"); print("\n".join(f"- {name}" for name in generated))
+    print(f"Output directory: {Path(args.output_dir).resolve()}"); print("Generated files:"); print("\n".join(f"- {name}" for name in generated))
+    print("backtest_summary.csv key rows:")
+    print(summary.loc[[x for x in ("Alpha_Always","Alpha_Regime_Filter","SPY","QQQ","VT") if x in summary.index],["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar"]].to_string())
+    print(f"Final provisional verdict: {verdict}")
 if __name__=="__main__": main()

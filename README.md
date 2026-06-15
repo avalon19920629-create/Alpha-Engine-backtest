@@ -32,8 +32,11 @@ python alpha_engine_backtest.py --demo --start 2018-01-01 --end 2025-12-31 --out
 ## テスト
 
 ```bash
+python -m py_compile alpha_engine_backtest.py tests/test_alpha_engine_backtest.py
 python -m unittest -v
 ```
+
+Colabでの確認記録には、実行日、コミットID、および `python -m unittest -v` の最終行（例: `OK`）を記載してください。
 
 ## Live mode（yfinance 実データ）
 

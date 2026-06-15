@@ -34,3 +34,13 @@ python alpha_engine_backtest.py --demo --start 2018-01-01 --end 2025-12-31 --out
 ```bash
 python -m unittest -v
 ```
+
+## Live mode（yfinance 実データ）
+
+`--demo` を付けない場合は、Alpha-Engine と同じ現在の US / JP ユニバース、レジーム指数、ベンチマークを yfinance から取得します。スコア計算のため開始日の400営業日前から取得しますが、評価期間は `--start` 以降です。
+
+```bash
+python alpha_engine_backtest.py --start 2015-01-01 --end 2026-06-15 --rebalance quarterly --output-dir artifacts/live
+```
+
+Live mode は yfinance と外部ネットワークの可用性に依存します。現在の構成銘柄を過去にも適用するため生存者バイアスがあり、上場廃止・銘柄変更・過去の指数構成を完全には再現しません。また、企業行動の調整、欠損、配信元の訂正など価格データ品質にも限界があります。結果は調査用途であり、取引判断には追加検証が必要です。

@@ -59,3 +59,13 @@ python core_alpha_integration_backtest.py --start 2015-01-01 --end 2026-06-15 --
 `config/lumus8_core_weights.csv` は Core のティッカーと比率を定義し、合計は必ず1.0にしてください。初期値は正式比率を仮定しない全ゼロであるため、実行前に利用者が設定する必要があります。`CASH` は日次0%リターンとして扱います。
 
 出力先には summary、年次/月次リターン、ドローダウン、資産曲線、回転率、Core比較、選定履歴、およびMarkdown監査レポートが生成されます。Alpha側には現在ユニバース由来の生存者バイアスがあり、Core結果は設定ファイルの比率に依存します。本機能は投資助言ではなく、自動売買・自動売却・自動配分変更には接続しません。
+
+## L.U.M.U.S.-8 Core Profiles + Alpha Integration Backtest
+
+複数のCore候補を同時に読み込み、各Core単体と `Alpha_Always` 10% / 15% / 20% 混合を比較します。`MAX_CAGR_MDD25` はCAGRを重視しつつ最大ドローダウン25%を意識した攻撃型候補、`ROBUST_MEDIAN` は配分の頑健性を重視した候補です。
+
+```bash
+python core_alpha_integration_backtest.py --start 2015-01-01 --end 2026-06-15 --core-profiles config/lumus8_core_profiles.csv --output-dir artifacts/core_alpha_profiles
+```
+
+`config/lumus8_core_profiles.csv` は `profile,ticker,weight` 形式で、各profileのweight合計は必ず1.0です。GLDはGLDMの長期履歴プロキシ、SHYは短期債または現金相当枠として使用します（`CASH` 指定時は日次0%）。BTC-USDはETFと取引日・市場時間が異なる可能性があります。Alpha側には現在ユニバースによる生存者バイアスがあります。本監査は投資助言ではなく、自動売買・自動売却・自動配分変更には接続しません。

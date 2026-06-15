@@ -1,0 +1,26 @@
+import tempfile, unittest
+from pathlib import Path
+import numpy as np, pandas as pd
+import core_alpha_integration_backtest as c
+
+class TestProfiles(unittest.TestCase):
+ def setUp(self):
+  self.idx=pd.bdate_range('2019-01-01',periods=800); rng=np.random.default_rng(2)
+  names=['VT','TLT','TIP','GLD','XLRE','DBC','SHY','BTC-USD','SPY','QQQ','^GSPC','^N225',*[f'US{i}' for i in range(8)],*[f'JP{i}.T' for i in range(8)]]
+  self.p=pd.DataFrame({n:100*np.exp(np.cumsum(rng.normal(.0002,.008,len(self.idx)))) for n in names},index=self.idx)
+  self.profiles={'A':pd.Series({'VT':.5,'BNDX':0.,'GLD':.2,'SHY':.2,'BTC-USD':.1}),'B':pd.Series({'VT':.4,'TLT':.2,'TIP':.1,'CASH':.2,'BTC-USD':.1})}
+ def test_load_validation_and_zero_weight_not_required(self):
+  with tempfile.TemporaryDirectory() as d:
+   good=Path(d)/'good.csv'; pd.DataFrame([['A','VT',.5],['A','BNDX',0],['A','CASH',.5]],columns=['profile','ticker','weight']).to_csv(good,index=False)
+   profiles=c.load_core_profiles(good); self.assertEqual(c.required_core_tickers(profiles),['VT']); c.core_returns(self.p,profiles['A'],'2020-01-01','2021-01-01')
+   bad=Path(d)/'bad.csv'; pd.DataFrame([['A','VT',.9]],columns=['profile','ticker','weight']).to_csv(bad,index=False)
+   with self.assertRaises(ValueError): c.load_core_profiles(bad)
+ def test_btc_shy_cash_and_two_profile_outputs(self):
+  _,assets=c.core_returns(self.p,self.profiles['A'],'2020-01-01','2021-01-01'); self.assertIn('BTC-USD',assets); self.assertIn('SHY',assets)
+  _,assets=c.core_returns(self.p,self.profiles['B'],'2020-01-01','2021-01-01'); self.assertTrue((assets.CASH==0).all())
+  with tempfile.TemporaryDirectory() as d:
+   summary,_=c.run_profiles(self.p,[f'US{i}' for i in range(8)],[f'JP{i}.T' for i in range(8)],self.profiles,'2020-01-01','2021-12-31',d)
+   for p in self.profiles:
+    for n in ('Core_Only','Core90_Alpha10','Core85_Alpha15','Core80_Alpha20'): self.assertIn(f'{p}_{n}',summary.index)
+   self.assertTrue((Path(d)/'core_alpha_profile_summary.csv').exists()); self.assertTrue((Path(d)/'core_alpha_profile_report.md').exists())
+if __name__=='__main__': unittest.main()

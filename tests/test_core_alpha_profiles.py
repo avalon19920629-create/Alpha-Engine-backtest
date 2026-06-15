@@ -23,4 +23,19 @@ class TestProfiles(unittest.TestCase):
    for p in self.profiles:
     for n in ('Core_Only','Core90_Alpha10','Core85_Alpha15','Core80_Alpha20'): self.assertIn(f'{p}_{n}',summary.index)
    self.assertTrue((Path(d)/'core_alpha_profile_summary.csv').exists()); self.assertTrue((Path(d)/'core_alpha_profile_report.md').exists())
+ def test_evaluation_window_controls_all_metrics_and_equity(self):
+  idx=pd.bdate_range('2014-01-01','2016-01-01'); r=pd.Series(.001,index=idx)
+  r.loc['2014-06-02']=-.8; r.loc['2015-06-01']=-.1
+  with tempfile.TemporaryDirectory() as d:
+   returns=pd.DataFrame({'A_Core_Only':r,'A_Core90_Alpha10':r,'A_Core85_Alpha15':r,'A_Core80_Alpha20':r})
+   summary,_=c.write_profile_outputs(d,returns,{'A':pd.Series({'CASH':1.})},pd.DataFrame(),pd.DataFrame(),'2015-01-01','2016-01-01','2014-01-01')
+   row=summary.loc['A_Core_Only']; equity=pd.read_csv(Path(d)/'core_alpha_profile_equity_curves.csv',index_col=0)
+   self.assertGreaterEqual(pd.Timestamp(row.Evaluation_Start),pd.Timestamp('2015-01-01'))
+   self.assertAlmostEqual(row.Evaluation_Years,1.0,places=2)
+   self.assertAlmostEqual(row.CAGR,(1+row.Total_Return)**(1/row.Evaluation_Years)-1)
+   self.assertGreater(row.Max_Drawdown,-.8)
+   self.assertAlmostEqual(row.Calmar,row.CAGR/abs(row.Max_Drawdown) if row.Max_Drawdown else np.nan)
+   self.assertGreaterEqual(pd.Timestamp(equity.index.min()),pd.Timestamp('2015-01-01'))
+   expected=(1+r.loc['2015-01-01':'2016-01-01']).cumprod()
+   self.assertAlmostEqual(equity['A_Core_Only'].iloc[0],expected.iloc[0])
 if __name__=='__main__': unittest.main()

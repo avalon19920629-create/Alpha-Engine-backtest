@@ -69,3 +69,6 @@ python core_alpha_integration_backtest.py --start 2015-01-01 --end 2026-06-15 --
 ```
 
 `config/lumus8_core_profiles.csv` は `profile,ticker,weight` 形式で、各profileのweight合計は必ず1.0です。GLDはGLDMの長期履歴プロキシ、SHYは短期債または現金相当枠として使用します（`CASH` 指定時は日次0%）。BTC-USDはETFと取引日・市場時間が異なる可能性があります。Alpha側には現在ユニバースによる生存者バイアスがあります。本監査は投資助言ではなく、自動売買・自動売却・自動配分変更には接続しません。
+
+### 評価期間とメトリクス計算
+価格取得はAlphaスコア計算とリバランス準備のため `--start` より前のwarmup期間を含みますが、CAGR、MaxDD、Sharpe、Calmar、Total_Returnなどの成績指標は `--start` 以降、`--end` 以前の評価期間リターンのみで計算します。CAGRの年数分母にwarmup期間は含めず、Equity Curveも評価開始時点でリセットします。本バックテストは戦略検証・コード品質確認を目的とし、投資助言ではありません。

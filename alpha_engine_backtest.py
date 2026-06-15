@@ -1,12 +1,44 @@
 """Point-in-time Alpha Engine backtest audit (research only; no trading connection)."""
 from __future__ import annotations
-import argparse, logging
+import argparse, importlib.util, logging
 from pathlib import Path
 import numpy as np
 import pandas as pd
 
 LOG=logging.getLogger("alpha_backtest")
 BENCHMARKS={"SPY":"SPY","QQQ":"QQQ","VT":"VT","TOPIX":"1306.T"}
+OUTPUT_FILES=("backtest_summary.csv","selected_tickers_by_period.csv","annual_returns.csv","monthly_returns.csv","drawdown_report.csv","turnover_report.csv","momentum_alpha_backtest_report.md")
+
+def get_live_universe():
+    """Load the same current US/JP universe used by Alpha-Engine.py."""
+    path=Path(__file__).with_name("Alpha-Engine.py")
+    spec=importlib.util.spec_from_file_location("alpha_engine_live",path); module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module.get_tickers_lumus()
+
+def _close_frame(raw, requested):
+    if raw is None or raw.empty:return pd.DataFrame()
+    if isinstance(raw.columns,pd.MultiIndex):
+        if "Close" in raw.columns.get_level_values(0): raw=raw["Close"]
+        elif "Close" in raw.columns.get_level_values(-1): raw=raw.xs("Close",axis=1,level=-1)
+        else:return pd.DataFrame()
+    elif "Close" in raw.columns: raw=raw[["Close"]].rename(columns={"Close":requested[0]})
+    raw=raw.apply(pd.to_numeric,errors="coerce").dropna(axis=1,how="all")
+    raw.columns=[str(x) for x in raw.columns]
+    return raw
+
+def download_live_prices(tickers,start,end,batch_size=100):
+    """Download adjusted closes without allowing one bad ticker to abort live mode."""
+    import yfinance as yf
+    fetch_start=(pd.Timestamp(start)-pd.offsets.BDay(400)).date().isoformat(); fetch_end=(pd.Timestamp(end)+pd.Timedelta(days=1)).date().isoformat(); frames=[]
+    for i in range(0,len(tickers),batch_size):
+        batch=list(dict.fromkeys(tickers[i:i+batch_size]))
+        try: frame=_close_frame(yf.download(batch,start=fetch_start,end=fetch_end,auto_adjust=True,progress=False,group_by="column",threads=True),batch)
+        except Exception as exc: LOG.warning("price download failed for batch %s: %s",batch,exc); continue
+        missing=sorted(set(batch)-set(frame.columns))
+        for ticker in missing: LOG.warning("price unavailable: %s",ticker)
+        if not frame.empty:frames.append(frame)
+    if not frames:return pd.DataFrame()
+    return pd.concat(frames,axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index()
 
 def exposure_for_regimes(us, jp):
     return 1.0 if us==jp=="BULL" else 0.6 if "BULL" in (us,jp) else 0.2
@@ -82,7 +114,7 @@ def demo_prices():
 
 def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     out=Path(out); out.mkdir(parents=True,exist_ok=True); selected.to_csv(out/"selected_tickers_by_period.csv",index=False); turnover.to_csv(out/"turnover_report.csv",index=False)
-    allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary["Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
+    allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
     annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in allr.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in allr.items()}); annual.to_csv(out/"annual_returns.csv"); monthly.to_csv(out/"monthly_returns.csv")
     pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in allr.items()}).to_csv(out/"drawdown_report.csv")
     a=summary.loc["Alpha_Always"]; f=summary.loc["Alpha_Regime_Filter"]; verdict="研究枠へ降格" if f.Sharpe<=0 or f.Max_Drawdown<-.35 else "独立ユニット化可能" if f.Sharpe>=a.Sharpe and f.Max_Drawdown>=a.Max_Drawdown else "L.U.M.U.S.-8内の15%補助枠として継続"
@@ -90,6 +122,12 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
-    if not args.demo: raise SystemExit("v0.1: use --demo, or import run_backtest with an adjusted-close DataFrame")
-    p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]; s,sel,t=run_backtest(p,us,jp,args.start,args.end); b={k:p[v].pct_change().loc[args.start:args.end].fillna(0) for k,v in BENCHMARKS.items()}; write_outputs(args.output_dir,s,sel,t,b)
+    if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
+    else:
+        us,jp=get_live_universe(); requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
+        if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    s,sel,t=run_backtest(p,us,jp,args.start,args.end); b={k:p[v].pct_change().loc[args.start:args.end].fillna(0) for k,v in BENCHMARKS.items() if v in p}; write_outputs(args.output_dir,s,sel,t,b)
+    generated=[name for name in OUTPUT_FILES if (Path(args.output_dir)/name).is_file()]
+    if not generated: raise SystemExit("error: no backtest artifacts were generated")
+    print(f"Saved artifacts to {Path(args.output_dir).resolve()}"); print("Generated files:"); print("\n".join(f"- {name}" for name in generated))
 if __name__=="__main__": main()

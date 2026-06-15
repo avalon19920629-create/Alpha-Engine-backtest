@@ -1,4 +1,5 @@
 import tempfile, unittest
+from unittest.mock import patch
 from pathlib import Path
 import numpy as np, pandas as pd
 import alpha_engine_backtest as a
@@ -13,4 +14,15 @@ class TestAudit(unittest.TestCase):
  def test_trade_after_screen_and_csv(self):
   s,x,t=a.run_backtest(self.p,[f"US{i}" for i in range(8)],[f"JP{i}.T" for i in range(8)],"2020-01-01","2021-12-31"); self.assertTrue((pd.to_datetime(x.trade_date)>pd.to_datetime(x.screen_date)).all())
   with tempfile.TemporaryDirectory() as d: a.write_outputs(d,s,x,t); self.assertTrue((Path(d)/"selected_tickers_by_period.csv").exists())
+
+ def test_live_download_multiindex_and_warmup(self):
+  idx=pd.bdate_range("2013-01-01","2016-01-01"); raw=pd.DataFrame({("Close","AAA"):np.arange(len(idx))+100.,("Close","BAD"):np.nan},index=idx)
+  with patch("yfinance.download",return_value=raw) as download:
+   got=a.download_live_prices(["AAA","BAD"],"2015-01-01","2015-12-31")
+  self.assertEqual(list(got.columns),["AAA"]); self.assertLessEqual(pd.Timestamp(download.call_args.kwargs["start"]),pd.Timestamp("2013-06-20"))
+ def test_summary_strategy_and_benchmark_turnover(self):
+  s,x,t=a.run_backtest(self.p,[f"US{i}" for i in range(8)],[f"JP{i}.T" for i in range(8)],"2020-01-01","2021-12-31")
+  with tempfile.TemporaryDirectory() as d:
+   a.write_outputs(d,s,x,t,{"SPY":self.p.SPY.pct_change().loc["2020-01-01":"2021-12-31"]}); summary=pd.read_csv(Path(d)/"backtest_summary.csv")
+   self.assertEqual(summary.columns[0],"Strategy"); self.assertTrue(pd.isna(summary.loc[summary.Strategy=="SPY","Turnover"]).all())
 if __name__=="__main__": unittest.main()

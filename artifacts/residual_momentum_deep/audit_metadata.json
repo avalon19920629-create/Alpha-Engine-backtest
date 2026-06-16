@@ -1,0 +1,85 @@
+{
+  "generated_at": "2026-06-16T11:12:00.956739+00:00",
+  "data_start": "2018-01-01",
+  "data_end": "2025-12-31",
+  "rebalance_frequency": "quarterly / about every 90 days",
+  "ttl_days": 90,
+  "universe_size": {
+    "US": 8,
+    "JP": 8
+  },
+  "variants": [
+    {
+      "name": "Baseline",
+      "base_weight": 1.0,
+      "residual_weight": 0.0,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_05",
+      "base_weight": 0.95,
+      "residual_weight": 0.05,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_10",
+      "base_weight": 0.9,
+      "residual_weight": 0.1,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_15",
+      "base_weight": 0.85,
+      "residual_weight": 0.15,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_20",
+      "base_weight": 0.8,
+      "residual_weight": 0.2,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_25",
+      "base_weight": 0.75,
+      "residual_weight": 0.25,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_30",
+      "base_weight": 0.7,
+      "residual_weight": 0.3,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_40",
+      "base_weight": 0.6,
+      "residual_weight": 0.4,
+      "vcp_weight": 0.0
+    }
+  ],
+  "residual_weights_tested": [
+    0.0,
+    0.05,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.4
+  ],
+  "residual_methods_tested": [
+    "simple",
+    "beta_adjusted"
+  ],
+  "benchmark_modes_tested": [
+    "broad_default",
+    "growth_adjusted_us",
+    "index_alt_jp",
+    "strict_available_default"
+  ],
+  "whether_exit_protocol_used": false,
+  "whether_regime_filter_used": false,
+  "whether_vcp_used": false,
+  "notes_on_missing_data": "Missing benchmarks/residual inputs fall back to neutral scores; demo mode is deterministic and network-free."
+}

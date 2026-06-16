@@ -1,0 +1,8 @@
+diagnostic,variant,ratio,value
+best_cagr_ratio,Residual_70,70,0.113923828997061
+best_sharpe_ratio,Residual_70,70,2.096373545700687
+best_sortino_ratio,Residual_70,70,3.5396331405717447
+best_calmar_ratio,Residual_70,70,3.460664411110343
+lowest_maxdd_ratio,Residual_70,70,-0.03291964070000908
+lowest_volatility_ratio,Residual_55,55,0.053776599753941445
+lowest_turnover_ratio_among_improving_variants,Residual_70,70,0.16651673639889752

@@ -1,0 +1,8 @@
+analysis,ratio_range,count
+cagr_improved_range,55-100%,10
+maxdd_improved_range,15%; 25-100%,17
+calmar_improved_range,45-100%,12
+sharpe_improved_range,55-100%,10
+sortino_improved_range,55-100%,10
+cagr_maxdd_calmar_simultaneous_improvement_range,55-100%,10
+best_plateau_near_best_calmar,65-85%,5

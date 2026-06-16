@@ -545,6 +545,241 @@ def run_residual_live_validation(prices=None,us=None,jp=None,start="2015-01-01",
     return summary
 
 
+RESIDUAL_FULL_SWEEP_WEIGHTS=tuple(round(x/100,2) for x in range(0,101,5))
+
+
+def build_residual_full_sweep_variants():
+    """Build 0%-100% residual sweep variants; Baseline is base-only and unchanged."""
+    return tuple({"name":"Baseline" if w==0 else f"Residual_{int(w*100):02d}","base_weight":round(1-w,2),"residual_weight":round(w,2),"vcp_weight":0.0} for w in RESIDUAL_FULL_SWEEP_WEIGHTS)
+
+
+def _cache_metadata(start,end,requested,benchmark_tickers):
+    return {"start":str(start),"end":str(end),"requested_tickers":list(requested),"benchmark_tickers":list(benchmark_tickers),"created_at":pd.Timestamp.now("UTC").isoformat(),"cache_version":"residual_full_sweep_v1","git_tracking_note":"Binary price cache files are generated at runtime and intentionally ignored by git."}
+
+
+def validate_price_cache(cache_dir,start,end,requested,benchmark_tickers):
+    cache_dir=Path(cache_dir); meta_path=cache_dir/"cache_metadata.json"; prices_path=cache_dir/"prices.pkl"; bench_path=cache_dir/"benchmarks.pkl"
+    if not (meta_path.exists() and prices_path.exists() and bench_path.exists()): return False,"missing_cache_files"
+    try:
+        import json
+        meta=json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta.get("start")!=str(start) or meta.get("end")!=str(end): return False,"cache_period_mismatch"
+        if set(meta.get("requested_tickers",[]))!=set(requested): return False,"cache_universe_mismatch"
+        if set(meta.get("benchmark_tickers",[]))!=set(benchmark_tickers): return False,"cache_benchmark_mismatch"
+        pd.read_pickle(prices_path); pd.read_pickle(bench_path)
+        return True,"ok"
+    except Exception as exc:
+        return False,f"cache_corrupt: {exc}"
+
+
+def load_price_cache(cache_dir):
+    cache_dir=Path(cache_dir)
+    return pd.read_pickle(cache_dir/"prices.pkl"), pd.read_pickle(cache_dir/"benchmarks.pkl")
+
+
+def build_price_cache(tickers,benchmark_tickers,start,end,cache_dir,downloader=None,batch_size=80):
+    """Download once, write pickle/csv cache, and return prices/failures/requested/cache metadata."""
+    cache_dir=Path(cache_dir); cache_dir.mkdir(parents=True,exist_ok=True)
+    requested=list(dict.fromkeys(normalize_yfinance_ticker(t) for t in tickers)); benchmarks=list(dict.fromkeys(normalize_yfinance_ticker(t) for t in benchmark_tickers))
+    ok,reason=validate_price_cache(cache_dir,start,end,requested,benchmarks)
+    if ok:
+        prices,bench=load_price_cache(cache_dir)
+        failures=pd.DataFrame(columns=["ticker","reason"])
+        meta={**_cache_metadata(start,end,requested,benchmarks),"cache_used":True,"cache_path":str(cache_dir),"cache_status":"hit"}
+        return pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(), failures, requested, meta
+    print(f"[residual_full_sweep] cache miss ({reason}); downloading {len(requested)} tickers and {len(benchmarks)} benchmarks")
+    prices,failures,requested2=download_live_universe_prices(list(dict.fromkeys([*requested,*benchmarks])),start,end,batch_size=batch_size,downloader=downloader)
+    bench=prices[[c for c in benchmarks if c in prices.columns]].copy() if not prices.empty else pd.DataFrame()
+    nonbench=prices[[c for c in prices.columns if c not in benchmarks]].copy() if not prices.empty else pd.DataFrame()
+    nonbench.to_pickle(cache_dir/"prices.pkl"); bench.to_pickle(cache_dir/"benchmarks.pkl")
+    pd.DataFrame({"ticker":requested}).to_csv(cache_dir/"universe.csv",index=False)
+    import json
+    meta={**_cache_metadata(start,end,requested,benchmarks),"cache_used":False,"cache_path":str(cache_dir),"cache_status":reason}
+    (cache_dir/"cache_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
+    return prices,failures,requested2,meta
+
+
+def run_residual_full_sweep_variant(prices,us,jp,start,end,variant,benchmark_mode=None,method="simple"):
+    return _run_residual_deep_variant(prices,us,jp,start,end,variant,benchmark_mode,method)
+
+
+def compute_peak_ratio_diagnostics(summary):
+    rows=[]
+    def ratio(name): return 0 if name=="Baseline" else int(str(name).split("_")[-1])
+    specs=[("best_cagr_ratio","CAGR",False),("best_sharpe_ratio","Sharpe",False),("best_sortino_ratio","Sortino",False),("best_calmar_ratio","Calmar",False),("lowest_maxdd_ratio","Max_Drawdown",True),("lowest_volatility_ratio","Annualized_Volatility",True)]
+    for metric_name,col,lowest in specs:
+        s=summary[col].dropna()
+        if s.empty: rows.append({"diagnostic":metric_name,"variant":"","ratio":np.nan,"value":np.nan}); continue
+        idx=s.idxmax() if not lowest else (s.abs().idxmin() if col=="Max_Drawdown" else s.idxmin())
+        rows.append({"diagnostic":metric_name,"variant":idx,"ratio":ratio(idx),"value":summary.loc[idx,col]})
+    base=summary.loc["Baseline"] if "Baseline" in summary.index else None
+    imp=summary[(summary.CAGR>base.CAGR)&(summary.Calmar>base.Calmar)] if base is not None else pd.DataFrame()
+    if not imp.empty:
+        idx=imp.Turnover.idxmin(); rows.append({"diagnostic":"lowest_turnover_ratio_among_improving_variants","variant":idx,"ratio":ratio(idx),"value":summary.loc[idx,"Turnover"]})
+    return pd.DataFrame(rows)
+
+
+def _ranges_from_ratios(ratios):
+    ratios=sorted(int(x) for x in ratios)
+    if not ratios: return "none"
+    bands=[]; start=prev=ratios[0]
+    for r in ratios[1:]:
+        if r==prev+5: prev=r
+        else: bands.append(f"{start}-{prev}%" if start!=prev else f"{start}%"); start=prev=r
+    bands.append(f"{start}-{prev}%" if start!=prev else f"{start}%")
+    return "; ".join(bands)
+
+
+def compute_plateau_analysis(summary):
+    if "Baseline" not in summary.index: return pd.DataFrame()
+    base=summary.loc["Baseline"]
+    work=summary.copy(); work["ratio"]= [0 if i=="Baseline" else int(str(i).split("_")[-1]) for i in work.index]
+    checks={"cagr_improved_range":work.CAGR>base.CAGR,"maxdd_improved_range":work.Max_Drawdown.abs()<abs(base.Max_Drawdown),"calmar_improved_range":work.Calmar>base.Calmar,"sharpe_improved_range":work.Sharpe>base.Sharpe,"sortino_improved_range":work.Sortino>base.Sortino}
+    rows=[]
+    for name,mask in checks.items(): rows.append({"analysis":name,"ratio_range":_ranges_from_ratios(work.loc[mask,"ratio"]),"count":int(mask.sum())})
+    combo=(work.CAGR>base.CAGR)&(work.Max_Drawdown.abs()<abs(base.Max_Drawdown))&(work.Calmar>base.Calmar)
+    rows.append({"analysis":"cagr_maxdd_calmar_simultaneous_improvement_range","ratio_range":_ranges_from_ratios(work.loc[combo,"ratio"]),"count":int(combo.sum())})
+    best=work.sort_values("Calmar",ascending=False).head(1)
+    br=int(best.ratio.iloc[0]) if not best.empty else 0; neigh=work[work.ratio.between(max(0,br-10),min(100,br+10))]
+    stable=neigh[(neigh.Calmar>base.Calmar)&(neigh.CAGR>=base.CAGR*0.98)]
+    rows.append({"analysis":"best_plateau_near_best_calmar","ratio_range":_ranges_from_ratios(stable.ratio),"count":len(stable)})
+    return pd.DataFrame(rows)
+
+
+def classify_residual_concept(best_ratio):
+    if pd.isna(best_ratio): return "No usable classification"
+    r=int(best_ratio)
+    if r==100: return "Pure Residual"
+    if 75<=r<=95: return "Residual Dominant"
+    if 30<=r<=70: return "Hybrid Core"
+    if 5<=r<=25: return "Auxiliary Lens"
+    return "Baseline / No residual improvement"
+
+
+def compare_full_sweep_selection_diff(selected,score_components,best_variant=None):
+    detailed=_selection_diff_detailed(selected,score_components)
+    keep={"Residual_20","Residual_25","Residual_30","Residual_50","Residual_75","Residual_100"}
+    if best_variant and best_variant!="Baseline": keep.add(best_variant)
+    return detailed[detailed["variant"].isin(keep)].copy() if "variant" in detailed else detailed
+
+
+def _empty_full_sweep_outputs(out,variants,dq,failures,meta,modes):
+    metric_cols=["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Sortino","Total_Return","Best_Year","Worst_Year","Monthly_Win_Rate","Turnover","Number_of_Rebalances","Judgment"]
+    summary=pd.DataFrame(index=[v["name"] for v in variants],columns=metric_cols); summary.index.name="Variant"; summary["Judgment"]=["baseline" if i==0 else "skipped_no_usable_data" for i in range(len(summary))]
+    empty=pd.DataFrame(); peak=compute_peak_ratio_diagnostics(summary); plateau=compute_plateau_analysis(summary)
+    bench=pd.DataFrame([{"benchmark_mode":m,"status":"skipped_no_usable_data"} for m in modes])
+    for name,df in (("variant_summary.csv",summary),("annual_returns.csv",empty),("monthly_returns.csv",empty),("drawdown_series.csv",empty),("turnover.csv",empty),("selected_tickers.csv",empty),("selection_diff.csv",empty),("score_components.csv",empty),("benchmark_sensitivity.csv",bench),("data_quality.csv",dq),("download_failures.csv",failures),("peak_ratio_diagnostics.csv",peak),("plateau_analysis.csv",plateau)):
+        df.to_csv(out/name,index=(name in ("variant_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv")))
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2); return summary,bench,peak,plateau
+
+
+def run_residual_full_sweep(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/residual_full_sweep",downloader=None):
+    """Run 0-100% simple residual momentum full sweep with cache, no Exit/Regime/VCP."""
+    import json
+    end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True)
+    if us is None or jp is None: us,jp=get_live_universe()
+    us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]
+    modes=build_benchmark_modes(); bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals})
+    variants=build_residual_full_sweep_variants(); requested=list(dict.fromkeys([*us,*jp]))
+    cache_meta={"cache_used":False,"cache_path":str(out/"cache")}; failures=pd.DataFrame(columns=["ticker","reason"])
+    if prices is None:
+        prices,failures,download_requested,cache_meta=build_price_cache(requested,bench_tickers,start,end,out/"cache",downloader=downloader)
+        requested=download_requested
+    else:
+        requested=list(dict.fromkeys([*requested,*bench_tickers])); cache_meta["cache_status"]="provided_prices_no_download"
+        pd.DataFrame({"ticker":[*us,*jp]}).to_csv(out/"cache"/"universe.csv",index=False)
+        prices.to_pickle(out/"cache"/"prices.pkl"); prices[[c for c in bench_tickers if c in prices.columns]].to_pickle(out/"cache"/"benchmarks.pkl")
+        (out/"cache"/"cache_metadata.json").write_text(json.dumps({**_cache_metadata(start,end,[*us,*jp],bench_tickers),**cache_meta},indent=2,default=str),encoding="utf-8")
+    benchmark_status={name:{region:_resolve_benchmark(prices,region,mode) for region in ("US","JP")} for name,mode in modes.items()}
+    dq,insufficient,excluded,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end,benchmark_status={k:str(v) for k,v in benchmark_status.items()})
+    dq=pd.concat([dq,pd.DataFrame([{"metric":"cache_used","value":cache_meta.get("cache_used",False)},{"metric":"cache_path","value":cache_meta.get("cache_path",str(out/"cache"))},{"metric":"cache_created_at","value":cache_meta.get("created_at","")}])],ignore_index=True)
+    us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
+    base_meta={"generated_at":pd.Timestamp.now("UTC").isoformat(),"data_start":str(prices.index.min().date()) if len(prices.index) else "","data_end":str(prices.index.max().date()) if len(prices.index) else "","usable_start":str(pd.Timestamp(start).date()),"usable_end":str(pd.Timestamp(end).date()),"rebalance_frequency":"quarterly / about every 90 days","ttl_days":90,"universe_size_requested":len(requested),"universe_size_downloaded":len([t for t in requested if t in prices.columns]),"universe_size_usable":len(usable),"us_usable_count":len(us_usable),"jp_usable_count":len(jp_usable),"variants":list(variants),"residual_weights_tested":list(RESIDUAL_FULL_SWEEP_WEIGHTS),"benchmark_modes_tested":list(modes),"residual_method":"simple","cache_used":cache_meta.get("cache_used",False),"cache_path":cache_meta.get("cache_path",str(out/"cache")),"cache_git_tracking_note":"Binary price cache files such as prices.pkl and benchmarks.pkl are generated at runtime and intentionally ignored by git.","whether_exit_protocol_used":False,"whether_regime_filter_used":False,"whether_vcp_used":False,"data_source":"yfinance / Wikipedia / existing free universe" if prices is None else "provided/demo prices","notes_on_missing_data":"Failed/insufficient tickers are logged and excluded; missing residual inputs are neutralized.","notes_on_survivorship_bias":"Current free-data universes may be applied backward; historical constituent bias and survivorship bias remain."}
+    if prices.empty or not (us_usable or jp_usable):
+        summary,bench_cmp,peak,plateau=_empty_full_sweep_outputs(out,variants,dq,failures,base_meta,modes); base_meta.update({"best_cagr_ratio":None,"best_sharpe_ratio":None,"best_sortino_ratio":None,"best_calmar_ratio":None,"lowest_maxdd_ratio":None,"concept_classification":"No usable classification"}); (out/"audit_metadata.json").write_text(json.dumps(base_meta,indent=2,default=str),encoding="utf-8"); write_residual_full_sweep_report(summary,bench_cmp,dq,base_meta,peak,plateau,out); return summary
+    returns={}; selected=[]; scores=[]; turns=[]; default_mode=modes["broad_default"]
+    for v in variants:
+        r,sel,sc,tu=run_residual_full_sweep_variant(prices,us_usable,jp_usable,start,end,v,default_mode,"simple"); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu)
+    selected=pd.concat(selected,ignore_index=True); score_components=pd.concat(scores,ignore_index=True); turnover=pd.concat(turns,ignore_index=True); summary=_summary_from_returns(returns,turnover)
+    annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()})
+    peak=compute_peak_ratio_diagnostics(summary); best_calmar=peak.loc[peak.diagnostic=="best_calmar_ratio","variant"].iloc[0]; plateau=compute_plateau_analysis(summary); diff=compare_full_sweep_selection_diff(selected,score_components,best_calmar)
+    key={"Baseline","Residual_25","Residual_30","Residual_50","Residual_75","Residual_100",best_calmar}; bench_rows=[]
+    for mode_name,mode in modes.items():
+        ok=bool(_resolve_benchmark(prices,"US",mode) and _resolve_benchmark(prices,"JP",mode))
+        for v in [x for x in variants if x["name"] in key]:
+            if ok:
+                r,_,_,tu=run_residual_full_sweep_variant(prices,us_usable,jp_usable,start,end,v,mode,"simple"); bench_rows.append({"benchmark_mode":mode_name,"status":"ok","variant":v["name"],**metrics(r),"Turnover":tu.turnover.mean() if not tu.empty else np.nan})
+            else: bench_rows.append({"benchmark_mode":mode_name,"status":"skipped_missing_benchmark","variant":v["name"]})
+    bench_cmp=pd.DataFrame(bench_rows)
+    for name,df in (("variant_summary.csv",summary),("annual_returns.csv",annual),("monthly_returns.csv",monthly),("drawdown_series.csv",draw),("turnover.csv",turnover),("selected_tickers.csv",selected),("selection_diff.csv",diff),("score_components.csv",score_components),("benchmark_sensitivity.csv",bench_cmp),("data_quality.csv",dq),("download_failures.csv",failures),("peak_ratio_diagnostics.csv",peak),("plateau_analysis.csv",plateau)):
+        df.to_csv(out/name,index=(name in ("variant_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv")))
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2)
+    pmap=peak.set_index("diagnostic")["ratio"].to_dict(); concept=classify_residual_concept(pmap.get("best_calmar_ratio"))
+    base_meta.update({"best_cagr_ratio":pmap.get("best_cagr_ratio"),"best_sharpe_ratio":pmap.get("best_sharpe_ratio"),"best_sortino_ratio":pmap.get("best_sortino_ratio"),"best_calmar_ratio":pmap.get("best_calmar_ratio"),"lowest_maxdd_ratio":pmap.get("lowest_maxdd_ratio"),"concept_classification":concept})
+    (out/"audit_metadata.json").write_text(json.dumps(base_meta,indent=2,default=str),encoding="utf-8"); write_residual_full_sweep_report(summary,bench_cmp,dq,base_meta,peak,plateau,out); return summary
+
+
+def write_residual_full_sweep_report(summary,bench_cmp,data_quality,metadata,peak,plateau,output_dir="artifacts/residual_full_sweep"):
+    Path("reports").mkdir(exist_ok=True)
+    if "Baseline" in summary.index and summary.CAGR.notna().any():
+        base=summary.loc["Baseline"]; best_name=summary.drop(index="Baseline",errors="ignore").sort_values("Calmar",ascending=False).index[0] if len(summary.drop(index="Baseline",errors="ignore")) else "Baseline"; best=summary.loc[best_name]
+        headline=f"Best non-baseline by Calmar was **{best_name}**. Baseline CAGR {base.CAGR:.2%}, MaxDD {base.Max_Drawdown:.2%}, Calmar {base.Calmar:.2f}; {best_name} CAGR {best.CAGR:.2%}, MaxDD {best.Max_Drawdown:.2%}, Calmar {best.Calmar:.2f}."
+    else:
+        best_name="none"; headline="No usable live data was available; outputs are skipped/no-usable-data summaries, not live results."
+    view=summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Sortino","Calmar","Turnover","Judgment"] if c in summary.columns]]
+    report=f"""# Residual Momentum Full Sweep Audit Report
+
+## 1. Executive Summary
+{headline} Concept classification: **{metadata.get('concept_classification','pending')}**. This is a research classification only and is not production adoption.
+
+## 2. Baseline Reminder
+TTL 90 days, quarterly / four trades per year, no Exit Protocol, no Regime Filter, no VCP, no stop loss, no discretionary cash retreat. Baseline is Residual_00 / base_weight=1.0 / residual_weight=0.0.
+
+## CLI / Colab Commands
+`python alpha_engine_backtest.py --audit residual_full_sweep --output-dir artifacts/residual_full_sweep`
+
+`python alpha_engine_backtest.py --demo --audit residual_full_sweep --output-dir artifacts/residual_full_sweep`
+
+## 3. Data Quality Summary
+{_markdown_table(data_quality.set_index('metric') if isinstance(data_quality,pd.DataFrame) and not data_quality.empty else pd.DataFrame())}
+
+Cache used: {metadata.get('cache_used')} / cache path: `{metadata.get('cache_path')}`. Price cache files (`prices.pkl`, `benchmarks.pkl`) are generated at runtime and intentionally ignored by git; committed artifacts keep only text metadata such as `cache_metadata.json` and `universe.csv`. Missing downloads, insufficient history, current-constituent use, and survivorship bias can affect results. Demo artifacts are not live results.
+
+## 4. Full Sweep Summary
+{_markdown_table(view)}
+
+The sweep covers Residual_00 through Residual_100 in 5% increments. Inspect whether improvement continues above 30%, where metrics peak, and whether pure residual remains viable.
+
+## 5. Peak Ratio Diagnostics
+{_markdown_table(peak.set_index('diagnostic') if isinstance(peak,pd.DataFrame) and not peak.empty else pd.DataFrame())}
+
+## 6. Plateau / Band Analysis
+{_markdown_table(plateau.set_index('analysis') if isinstance(plateau,pd.DataFrame) and not plateau.empty else pd.DataFrame())}
+
+## 7. Concept Classification
+Classification: **{metadata.get('concept_classification','pending')}**. Auxiliary Lens is 5-25%, Hybrid Core is 30-70%, Residual Dominant is 75-95%, Pure Residual is 100%/near-best. This is research framing only.
+
+## 8. Benchmark Sensitivity
+{_markdown_table(bench_cmp.head(40).set_index(['benchmark_mode','variant']) if isinstance(bench_cmp,pd.DataFrame) and not bench_cmp.empty and {'benchmark_mode','variant'}.issubset(bench_cmp.columns) else bench_cmp)}
+
+## 9. Year / Period Review
+Use `annual_returns.csv`, `monthly_returns.csv`, and `drawdown_series.csv` for 2020, 2022, 2023, 2024, 2025, and 2026 YTD if present. This is post-analysis only and never changes trades.
+
+## 10. Selection Difference Review
+`selection_diff.csv` compares Baseline against Residual_25, Residual_30, Residual_50, Residual_75, Residual_100, Residual_20, and the best ratio where available. Review added/removed tickers, base/residual/final scores, US/JP mix, and whether residual is removing beta followers or merely adding volatility.
+
+## 11. Risk Review
+Focus on MaxDD, Worst Year, Worst Month/monthly returns, drawdowns, turnover, 2022 behavior, opportunity cost in 2023-2024, and Residual_100 risk. Calmar is emphasized over Sharpe because the question is return versus maximum loss.
+
+## 12. Recommendation
+Conservative candidate: first stable plateau ratio that improves Calmar/MaxDD. Balanced candidate: best Calmar ratio if nearby ratios also improve. Aggressive candidate: highest residual ratio that remains in the stable plateau. Do **not** productionize without year-by-year, benchmark, turnover, and selection-difference review.
+
+## 13. Safety Notes
+This is not investment advice. Historical tests do not guarantee future returns. yfinance/Wikipedia/free data can have missing values, delays, adjusted-price issues, survivorship bias, and historical constituent bias. The audit remains within individual-investor free-data constraints.
+"""
+    Path("reports/residual_full_sweep_report.md").write_text(report,encoding="utf-8")
+
+
 def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     out=Path(out); out.mkdir(parents=True,exist_ok=True); selected.to_csv(out/"selected_tickers_by_period.csv",index=False); turnover.to_csv(out/"turnover_report.csv",index=False)
     allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
@@ -555,14 +790,18 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         us,jp=get_live_universe()
+        if args.audit=="residual_full_sweep":
+            summary=run_residual_full_sweep(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         if args.audit=="residual_live_validation":
             summary=run_residual_live_validation(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="residual_full_sweep":
+        summary=run_residual_full_sweep(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_live_validation":
         summary=run_residual_live_validation(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_momentum_deep":

@@ -1,2 +1,6 @@
 __pycache__/
 *.py[cod]
+artifacts/**/cache/*.pkl
+artifacts/**/cache/*.pickle
+artifacts/**/cache/*.parquet
+artifacts/**/cache/*.feather

@@ -374,6 +374,177 @@ This is not investment advice. Historical yfinance/Wikipedia/free-data tests do 
     return summary
 
 
+RESIDUAL_LIVE_WEIGHTS=(0.0,0.10,0.15,0.20,0.25,0.30)
+
+
+def build_residual_live_variants():
+    """Residual Live Validation variants; Baseline is base-only and unchanged."""
+    return tuple({"name":"Baseline" if w==0 else f"Residual_{int(w*100):02d}","base_weight":round(1-w,2),"residual_weight":round(w,2),"vcp_weight":0.0} for w in RESIDUAL_LIVE_WEIGHTS)
+
+
+def normalize_yfinance_ticker(ticker):
+    """Normalize free-data universe tickers for yfinance without changing JP .T symbols."""
+    t=str(ticker).strip()
+    return t if t.endswith(".T") or t.startswith("^") else t.replace(".","-")
+
+
+def download_live_universe_prices(tickers,start="2015-01-01",end=None,batch_size=80,downloader=None):
+    """Download adjusted close data for live validation and return prices plus failure diagnostics."""
+    end=end or pd.Timestamp.today().date().isoformat(); import importlib
+    yf=None if downloader else importlib.import_module("yfinance")
+    downloader=downloader or yf.download
+    requested=list(dict.fromkeys(normalize_yfinance_ticker(t) for t in tickers)); frames=[]; failures=[]
+    fetch_start=(pd.Timestamp(start)-pd.offsets.BDay(400)).date().isoformat(); fetch_end=(pd.Timestamp(end)+pd.Timedelta(days=1)).date().isoformat()
+    for i in range(0,len(requested),batch_size):
+        batch=requested[i:i+batch_size]
+        try:
+            raw=downloader(batch,start=fetch_start,end=fetch_end,auto_adjust=True,progress=False,group_by="column",threads=True)
+            frame=_close_frame(raw,batch)
+        except Exception as exc:
+            failures.extend({"ticker":t,"reason":f"download_exception: {exc}"} for t in batch)
+            continue
+        got=set(frame.columns)
+        for t in sorted(set(batch)-got): failures.append({"ticker":t,"reason":"missing_or_empty_download"})
+        if not frame.empty: frames.append(frame)
+    prices=pd.concat(frames,axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index() if frames else pd.DataFrame()
+    return prices, pd.DataFrame(failures,columns=["ticker","reason"]), requested
+
+
+def build_live_data_quality_report(prices,requested,us,jp,failures,start,end,min_history=252,benchmark_status=None):
+    usable=[]; insufficient=[]
+    for t in requested:
+        if t in prices.columns and prices[t].dropna().shape[0]>=min_history: usable.append(t)
+        elif t in prices.columns: insufficient.append(t)
+    excluded=sorted(set(requested)-set(usable))
+    rows=[{"metric":"requested_tickers","value":len(requested)},{"metric":"successfully_downloaded_tickers","value":len([t for t in requested if t in prices.columns])},{"metric":"failed_tickers","value":0 if failures is None or failures.empty else failures.ticker.nunique()},{"metric":"insufficient_history_tickers","value":len(insufficient)},{"metric":"excluded_tickers","value":len(excluded)},{"metric":"final_usable_universe_size","value":len(usable)},{"metric":"us_usable_count","value":len([t for t in us if normalize_yfinance_ticker(t) in usable])},{"metric":"jp_usable_count","value":len([t for t in jp if normalize_yfinance_ticker(t) in usable])},{"metric":"data_start","value":str(prices.index.min().date()) if len(prices.index) else ""},{"metric":"data_end","value":str(prices.index.max().date()) if len(prices.index) else ""},{"metric":"usable_start","value":str(pd.Timestamp(start).date())},{"metric":"usable_end","value":str(pd.Timestamp(end).date())}]
+    for k,v in (benchmark_status or {}).items(): rows.append({"metric":f"benchmark_{k}","value":v})
+    return pd.DataFrame(rows), insufficient, excluded, usable
+
+
+def run_residual_live_variant(prices,us,jp,start,end,variant,benchmark_mode=None,method="simple"):
+    return _run_residual_deep_variant(prices,us,jp,start,end,variant,benchmark_mode,method)
+
+
+def _selection_diff_detailed(selected,score_components):
+    basic=compare_selection_diff(selected); rows=[]
+    for _,r in basic.iterrows():
+        dt=pd.Timestamp(r.rebalance_date); v=r.variant
+        for side,col in (("added",r.added_tickers),("removed",r.removed_tickers)):
+            for ticker in [x for x in str(col).split(";") if x]:
+                sc=score_components[(pd.to_datetime(score_components.date)==dt)&(score_components.variant.isin([v,"Baseline"]))&(score_components.ticker==ticker)]
+                src=sc[sc.variant==v] if side=="added" else sc[sc.variant=="Baseline"]
+                row={"rebalance_date":dt,"variant":v,"change_type":side,"ticker":ticker,"selected_tickers":r.selected_tickers,"added_tickers":r.added_tickers,"removed_tickers":r.removed_tickers}
+                if not src.empty: row.update(src.iloc[0].to_dict())
+                rows.append(row)
+    return pd.DataFrame(rows) if rows else basic
+
+
+def compare_live_selection_diff(selected,score_components):
+    return _selection_diff_detailed(selected,score_components)
+
+
+def _markdown_table(df):
+    if df.empty: return "(no rows)"
+    return "| " + " | ".join(map(str,df.columns)) + " |\n| " + " | ".join(["---"]*len(df.columns)) + " |\n" + "\n".join("| " + " | ".join(f"{x:.4f}" if isinstance(x,(float,np.floating)) and pd.notna(x) else str(x) for x in row) + " |" for row in df.itertuples(index=True,name=None))
+
+
+def write_residual_live_report(summary,bench_cmp,data_quality,metadata,output_dir="artifacts/residual_live_validation"):
+    Path("reports").mkdir(exist_ok=True); base=summary.loc["Baseline"]; best_name=summary.drop(index="Baseline").sort_values("Calmar",ascending=False).index[0]; best=summary.loc[best_name]
+    candidates=[v for v in ("Residual_15","Residual_20","Residual_25","Residual_30") if v in summary.index]
+    zone=summary.loc[candidates]; improved=zone[zone.Calmar>base.Calmar].index.tolist()
+    view=summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Sortino","Calmar","Turnover","Judgment"]]
+    bview=bench_cmp.head(24) if isinstance(bench_cmp,pd.DataFrame) else pd.DataFrame()
+    report=f"""# Residual Momentum Live Validation Report
+
+## 1. Executive Summary
+Best non-baseline by Calmar was **{best_name}**. Baseline CAGR {base.CAGR:.2%}, MaxDD {base.Max_Drawdown:.2%}, Calmar {base.Calmar:.2f}; {best_name} CAGR {best.CAGR:.2%}, MaxDD {best.Max_Drawdown:.2%}, Calmar {best.Calmar:.2f}. Residual_20 / Residual_25 are candidates only if their rows improve Calmar/MaxDD without unacceptable CAGR or turnover cost. Improved Calmar variants in the main 15-30% zone: {', '.join(improved) if improved else 'none'}. This is not a production adoption decision.
+
+## 2. Baseline Reminder
+TTL 90 days, quarterly / four trades per year, no Exit Protocol, no Regime Filter, no VCP, no stop loss, no discretionary cash retreat. Baseline remains current Alpha Engine base score only.
+
+## CLI / Colab Command
+`python alpha_engine_backtest.py --audit residual_live_validation --output-dir artifacts/residual_live_validation`
+
+Colab dependencies: `python -m pip install -r requirements.txt` (includes pandas/numpy/yfinance if declared; otherwise install `yfinance`).
+
+## 3. Data Quality Summary
+{_markdown_table(data_quality.set_index('metric'))}
+
+Missing downloads and insufficient history can reduce breadth; current constituents used historically can introduce survivorship / historical constituent bias.
+
+## 4. Variant Summary
+{_markdown_table(view)}
+
+## 5. Benchmark Sensitivity
+{_markdown_table(bview.set_index(['benchmark_mode','variant']) if not bview.empty else bview)}
+
+## 6. Year / Period Review
+Review `annual_returns.csv`, `monthly_returns.csv`, and `drawdown_series.csv` for 2020, 2022, 2023, 2024, 2025, and 2026 YTD when present. This is post-analysis only and never triggers cash retreat or trade suspension.
+
+## 7. Selection Difference Review
+`selection_diff.csv` compares Baseline with Residual_10/15/20/25/30 by rebalance date and records added/removed tickers plus score context where available. Use it to assess whether residual removes market beta followers and whether US/JP concentration changes.
+
+## 8. Risk Review
+Calmar and MaxDD are emphasized alongside CAGR, Sharpe, Sortino, worst year/month, drawdown series, and turnover. 2022 behavior and opportunity cost in 2023-2024 should be inspected before any vNext decision.
+
+## 9. Recommendation
+Continue Alpha Engine vNext research only if Residual_15-25 shows stable Calmar/MaxDD improvement across benchmark modes. Do not merge into production from this validation alone; keep Baseline untouched until broader live/free-data and bias checks are complete.
+
+## 10. Safety Notes
+This validation is research, not investment advice. Past data does not guarantee future returns. yfinance / Wikipedia / free data may have missing values, delays, adjusted-price issues, current-constituent bias, and survivorship bias. The audit is positioned as a realistic individual-investor free-data validation.
+"""
+    Path("reports/residual_live_validation_report.md").write_text(report,encoding="utf-8")
+
+
+def run_residual_live_validation(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/residual_live_validation",downloader=None):
+    """Run live/free-data simple Residual Momentum validation without Exit/Regime/VCP."""
+    import json
+    end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); Path("reports").mkdir(exist_ok=True)
+    if us is None or jp is None: us,jp=get_live_universe()
+    us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]
+    modes=build_benchmark_modes(); bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals})
+    requested=list(dict.fromkeys([*us,*jp,*bench_tickers,"^GSPC","^N225","^TOPX","SPY","QQQ","1306.T"]))
+    failures=pd.DataFrame(columns=["ticker","reason"])
+    if prices is None:
+        prices,failures,requested=download_live_universe_prices(requested,start,end,downloader=downloader)
+    benchmark_status={name:{region:_resolve_benchmark(prices,region,mode) for region in ("US","JP")} for name,mode in modes.items()}
+    dq,insufficient,excluded,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end,benchmark_status={k:str(v) for k,v in benchmark_status.items()})
+    us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
+    variants=build_residual_live_variants(); returns={}; selected=[]; scores=[]; turns=[]
+    if prices.empty or not (us_usable or jp_usable):
+        metric_cols=["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Sortino","Total_Return","Best_Year","Worst_Year","Monthly_Win_Rate","Turnover","Number_of_Rebalances","Judgment"]
+        summary=pd.DataFrame(index=[v["name"] for v in variants],columns=metric_cols); summary.index.name="Variant"; summary["Judgment"]=["baseline" if i==0 else "skipped_no_usable_data" for i in range(len(summary))]
+        empty=pd.DataFrame(); bench_cmp=pd.DataFrame([{"benchmark_mode":m,"status":"skipped_missing_benchmark","variant":v["name"]} for m in modes for v in variants if v["name"]!="Baseline"])
+        for name,df in (("variant_summary.csv",summary),("annual_returns.csv",empty),("monthly_returns.csv",empty),("drawdown_series.csv",empty),("turnover.csv",empty),("selected_tickers.csv",empty),("selection_diff.csv",empty),("score_components.csv",empty),("benchmark_sensitivity.csv",bench_cmp),("data_quality.csv",dq),("download_failures.csv",failures)):
+            df.to_csv(out/name,index=(name=="variant_summary.csv"))
+        summary.to_json(out/"variant_summary.json",orient="index",indent=2)
+        meta={"generated_at":pd.Timestamp.now("UTC").isoformat(),"data_start":"","data_end":"","usable_start":str(pd.Timestamp(start).date()),"usable_end":str(pd.Timestamp(end).date()),"rebalance_frequency":"quarterly / about every 90 days","ttl_days":90,"universe_size_requested":len(requested),"universe_size_downloaded":0,"universe_size_usable":0,"us_usable_count":0,"jp_usable_count":0,"variants":list(variants),"residual_weights_tested":list(RESIDUAL_LIVE_WEIGHTS),"benchmark_modes_tested":list(modes),"residual_method":"simple","whether_exit_protocol_used":False,"whether_regime_filter_used":False,"whether_vcp_used":False,"data_source":"yfinance / Wikipedia / existing free universe","notes_on_missing_data":"No usable downloaded prices; failures logged and audit skipped without crashing.","notes_on_survivorship_bias":"Current free-data universes may be applied backward; historical constituent bias and survivorship bias remain."}
+        (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
+        write_residual_live_report(summary,bench_cmp,dq,meta,out)
+        return summary
+    default_mode=modes["broad_default"]
+    for v in variants:
+        r,sel,sc,tu=run_residual_live_variant(prices,us_usable,jp_usable,start,end,v,default_mode,"simple"); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu)
+    selected=pd.concat(selected,ignore_index=True) if selected else pd.DataFrame(); score_components=pd.concat(scores,ignore_index=True) if scores else pd.DataFrame(); turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame()
+    summary=_summary_from_returns(returns,turnover); annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()}); diff=compare_live_selection_diff(selected,score_components)
+    bench_rows=[]
+    for mode_name,mode in modes.items():
+        ok=bool(_resolve_benchmark(prices,"US",mode) and _resolve_benchmark(prices,"JP",mode))
+        for w in (0.15,0.20,0.25,0.30):
+            v={"name":f"Residual_{int(w*100):02d}","base_weight":round(1-w,2),"residual_weight":w,"vcp_weight":0.0}
+            if ok:
+                r,_,_,tu=run_residual_live_variant(prices,us_usable,jp_usable,start,end,v,mode,"simple"); bench_rows.append({"benchmark_mode":mode_name,"status":"ok","variant":v["name"],**metrics(r),"Turnover":tu.turnover.mean() if not tu.empty else np.nan})
+            else: bench_rows.append({"benchmark_mode":mode_name,"status":"skipped_missing_benchmark","variant":v["name"]})
+    bench_cmp=pd.DataFrame(bench_rows)
+    for name,df in (("variant_summary.csv",summary),("annual_returns.csv",annual),("monthly_returns.csv",monthly),("drawdown_series.csv",draw),("turnover.csv",turnover),("selected_tickers.csv",selected),("selection_diff.csv",diff),("score_components.csv",score_components),("benchmark_sensitivity.csv",bench_cmp),("data_quality.csv",dq),("download_failures.csv",failures)):
+        df.to_csv(out/name,index=(name in ("variant_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv")))
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2)
+    meta={"generated_at":pd.Timestamp.now("UTC").isoformat(),"data_start":str(prices.index.min().date()) if len(prices.index) else "","data_end":str(prices.index.max().date()) if len(prices.index) else "","usable_start":str(pd.Timestamp(start).date()),"usable_end":str(pd.Timestamp(end).date()),"rebalance_frequency":"quarterly / about every 90 days","ttl_days":90,"universe_size_requested":len(requested),"universe_size_downloaded":len([t for t in requested if t in prices.columns]),"universe_size_usable":len(usable),"us_usable_count":len(us_usable),"jp_usable_count":len(jp_usable),"variants":list(variants),"residual_weights_tested":list(RESIDUAL_LIVE_WEIGHTS),"benchmark_modes_tested":list(modes),"residual_method":"simple","whether_exit_protocol_used":False,"whether_regime_filter_used":False,"whether_vcp_used":False,"data_source":"yfinance / Wikipedia / existing free universe","notes_on_missing_data":"Failed tickers are logged and excluded; missing residual inputs are neutralized rather than crashing.","notes_on_survivorship_bias":"Current free-data universes may be applied backward; historical constituent bias and survivorship bias remain."}
+    (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
+    write_residual_live_report(summary,bench_cmp,dq,meta,out)
+    return summary
+
+
 def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     out=Path(out); out.mkdir(parents=True,exist_ok=True); selected.to_csv(out/"selected_tickers_by_period.csv",index=False); turnover.to_csv(out/"turnover_report.csv",index=False)
     allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
@@ -384,11 +555,16 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
-        us,jp=get_live_universe(); requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
+        us,jp=get_live_universe()
+        if args.audit=="residual_live_validation":
+            summary=run_residual_live_validation(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
+        requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="residual_live_validation":
+        summary=run_residual_live_validation(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_momentum_deep":
         summary=run_residual_momentum_deep_audit(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="minervini_lens":

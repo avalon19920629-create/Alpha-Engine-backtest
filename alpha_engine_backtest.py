@@ -134,10 +134,10 @@ def _pick_benchmark(prices, region):
     candidates=("SPY","^GSPC") if region=="US" else ("1306.T","^TOPX","^N225")
     return next((c for c in candidates if c in prices.columns), None)
 
-def compute_residual_momentum_score(prices, tickers, as_of_date, region="US", windows=(63,126,252)):
+def compute_residual_momentum_score(prices, tickers, as_of_date, region="US", windows=(63,126,252), benchmark_mode=None, method="simple"):
     """Cross-sectional simple benchmark-adjusted momentum; missing benchmark falls back to neutral scores."""
     hist=asof_prices(prices,as_of_date).ffill(); tickers=[t for t in tickers if t in hist.columns]
-    bench=_pick_benchmark(hist,region)
+    bench=_resolve_benchmark(hist, region, benchmark_mode)
     rows=[]
     if not tickers:return pd.DataFrame(columns=["Ticker","residual_score"])
     for t in tickers:
@@ -146,7 +146,10 @@ def compute_residual_momentum_score(prices, tickers, as_of_date, region="US", wi
             if len(s)>n and bench and bench in hist:
                 b=hist[bench].dropna()
                 if len(b)>n:
-                    vals.append(w*((s.iloc[-1]/s.iloc[-n]-1)-(b.iloc[-1]/b.iloc[-n]-1)))
+                    if method=="beta_adjusted":
+                        vals.append(w*compute_beta_adjusted_residual_score(s, b, n))
+                    else:
+                        vals.append(w*((s.iloc[-1]/s.iloc[-n]-1)-(b.iloc[-1]/b.iloc[-n]-1)))
         rows.append((t, np.nan if not vals else sum(vals)/sum((1,2,3)[:len(vals)])))
     d=pd.DataFrame(rows,columns=["Ticker","residual_raw"]).set_index("Ticker")
     d["residual_score"]=_rank01(d.residual_raw)
@@ -234,6 +237,143 @@ def run_minervini_lens_audit(prices, us, jp, start, end, output_dir="artifacts/m
     return summary
 
 
+RESIDUAL_DEEP_WEIGHTS=(0.0,0.05,0.10,0.15,0.20,0.25,0.30,0.40)
+
+def build_residual_weight_variants():
+    return tuple({"name":"Baseline" if w==0 else f"Residual_{int(w*100):02d}","base_weight":round(1-w,2),"residual_weight":w,"vcp_weight":0.0} for w in RESIDUAL_DEEP_WEIGHTS)
+
+def build_benchmark_modes():
+    return {"broad_default":{"US":("SPY","^GSPC"),"JP":("1306.T","^TOPX")},"growth_adjusted_us":{"US":("QQQ",),"JP":("1306.T","^TOPX")},"index_alt_jp":{"US":("SPY","^GSPC"),"JP":("^N225",)},"strict_available_default":{"US":("SPY","^GSPC"),"JP":("1306.T","^TOPX","^N225")}}
+
+def _resolve_benchmark(prices, region, benchmark_mode=None):
+    if isinstance(benchmark_mode, dict):
+        for c in benchmark_mode.get(region, ()): 
+            if c in prices.columns: return c
+    return _pick_benchmark(prices, region)
+
+def compute_beta_adjusted_residual_score(stock, benchmark, window=63):
+    joined=pd.concat([stock.pct_change(), benchmark.pct_change()],axis=1).dropna().tail(window)
+    if len(joined)<5: return 0.0
+    ri=joined.iloc[:,0]; rm=joined.iloc[:,1]; var=rm.var()
+    if not np.isfinite(var) or var<=1e-12: return 0.0
+    beta=ri.cov(rm)/var
+    residual_daily=ri-beta*rm
+    return float((1+residual_daily).prod()-1) if len(residual_daily) else 0.0
+
+def combine_residual_score(base, residual, variant):
+    d=base.copy(); d["base_score"]=_rank01(d.Total_Score) if "Total_Score" in d else pd.Series(dtype=float)
+    d=d.join(residual[["residual_score","residual_raw"]],how="left") if "residual_raw" in residual else d.join(residual[["residual_score"]],how="left")
+    d["residual_score"]=d["residual_score"].fillna(0.5); d["residual_raw"]=d.get("residual_raw",pd.Series(index=d.index,dtype=float)).fillna(0.0)
+    d["Final_Score"]=variant["base_weight"]*d.base_score+variant["residual_weight"]*d.residual_score
+    return d.sort_values("Final_Score",ascending=False)
+
+def _window_return(hist, ticker, n):
+    if ticker not in hist or len(hist[ticker].dropna())<=n: return np.nan
+    s=hist[ticker].dropna(); return float(s.iloc[-1]/s.iloc[-n]-1)
+
+def _select_residual_deep(prices, us, jp, as_of_date, variant, benchmark_mode=None, method="simple", top_n=6):
+    frames=[]
+    for region,tickers in (("US",us),("JP",jp)):
+        base=score_universe(prices,[t for t in tickers if t in prices],as_of_date)
+        residual=compute_residual_momentum_score(prices,base.index,as_of_date,region,benchmark_mode=benchmark_mode,method=method)
+        d=combine_residual_score(base,residual,variant).head(top_n).copy(); d["Region"]=region; frames.append(d)
+    p=pd.concat(frames) if any(not x.empty for x in frames) else pd.DataFrame()
+    if not p.empty:
+        inv=1/p.Volatility; p["Weight"]=inv/inv.sum()
+    return p
+
+def _run_residual_deep_variant(prices, us, jp, start, end, variant, benchmark_mode=None, method="simple"):
+    prices=prices.sort_index(); rets=prices.pct_change(); dates=rebalance_dates(prices.index,start,end)
+    out=pd.Series(0.,index=prices.loc[start:end].index); records=[]; scores=[]; turns=[]; prev={}
+    for i,t in enumerate(dates):
+        future=prices.index[prices.index>t]
+        if not len(future): continue
+        trade=future[0]; next_t=dates[i+1] if i+1<len(dates) else pd.Timestamp(end); hold=out.index[(out.index>=trade)&(out.index<=next_t)]
+        p=_select_residual_deep(prices,us,jp,t,variant,benchmark_mode,method); weights=p.Weight.to_dict() if not p.empty else {}
+        out.loc[hold]=rets.reindex(hold)[list(weights)].mul(pd.Series(weights)).sum(axis=1) if weights else 0.
+        turns.append({"variant":variant["name"],"screen_date":t,"trade_date":trade,"turnover":sum(abs(weights.get(k,0)-prev.get(k,0)) for k in set(weights)|set(prev))/2}); prev=weights
+        hist=asof_prices(prices,t).ffill()
+        for ticker,row in p.iterrows():
+            region=row.get("Region"); bench=_resolve_benchmark(hist,region,benchmark_mode); rec={"variant":variant["name"],"screen_date":t,"trade_date":trade,"ticker":ticker,**row.to_dict()} ; records.append(rec)
+            scores.append({"date":t,"ticker":ticker,"market":region,"variant":variant["name"],"base_score":row.get("base_score"),"residual_score":row.get("residual_score"),"final_score":row.get("Final_Score"),"residual_weight":variant["residual_weight"],"base_weight":variant["base_weight"],"stock_return_3m":_window_return(hist,ticker,63),"stock_return_6m":_window_return(hist,ticker,126),"stock_return_12m":_window_return(hist,ticker,252),"benchmark_return_3m":_window_return(hist,bench,63),"benchmark_return_6m":_window_return(hist,bench,126),"benchmark_return_12m":_window_return(hist,bench,252),"residual_return_3m":row.get("residual_raw"),"residual_return_6m":np.nan,"residual_return_12m":np.nan,"benchmark_used":bench,"residual_method":method,"selected_flag":True,"weight":row.get("Weight")})
+    return out,pd.DataFrame(records),pd.DataFrame(scores),pd.DataFrame(turns)
+
+def compare_selection_diff(selected):
+    rows=[]
+    for dt,g in selected.groupby("screen_date"):
+        base=set(g[g.variant=="Baseline"].ticker)
+        for v,gv in g.groupby("variant"):
+            if v=="Baseline": continue
+            s=set(gv.ticker); rows.append({"rebalance_date":dt,"variant":v,"selected_tickers":";".join(sorted(s)),"added_tickers":";".join(sorted(s-base)),"removed_tickers":";".join(sorted(base-s)),"added_count":len(s-base),"removed_count":len(base-s)})
+    return pd.DataFrame(rows)
+
+def _summary_from_returns(returns, turnover):
+    summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name="Variant"; summary["Turnover"]=turnover.groupby("variant").turnover.mean(); summary["Number_of_Rebalances"]=turnover.groupby("variant").size(); summary["Judgment"]=[_judge(row,summary.loc["Baseline"]) for _,row in summary.iterrows()]; return summary
+
+def run_residual_momentum_deep_audit(prices, us, jp, start, end, output_dir="artifacts/residual_momentum_deep"):
+    import json
+    out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); Path("reports").mkdir(exist_ok=True)
+    variants=build_residual_weight_variants(); modes=build_benchmark_modes(); returns={}; selected=[]; scores=[]; turns=[]
+    for v in variants:
+        r,sel,sc,tu=_run_residual_deep_variant(prices,us,jp,start,end,v,modes["broad_default"],"simple"); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu)
+    selected=pd.concat(selected,ignore_index=True); score_components=pd.concat(scores,ignore_index=True); turnover=pd.concat(turns,ignore_index=True); summary=_summary_from_returns(returns,turnover)
+    annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()}); diff=compare_selection_diff(selected)
+    method_rows=[]
+    for method in ("simple","beta_adjusted"):
+      for w in (0.10,0.15,0.20,0.25,0.30):
+        v={"name":f"Residual_{int(w*100):02d}","base_weight":1-w,"residual_weight":w,"vcp_weight":0.0}; r,_,_,tu=_run_residual_deep_variant(prices,us,jp,start,end,v,modes["broad_default"],method); m=metrics(r); method_rows.append({"method":method,"variant":v["name"],**m,"Turnover":tu.turnover.mean()})
+    method_cmp=pd.DataFrame(method_rows)
+    bench_rows=[]
+    for mode_name,mode in modes.items():
+      for w in (0.15,0.20,0.25):
+        v={"name":f"Residual_{int(w*100):02d}","base_weight":1-w,"residual_weight":w,"vcp_weight":0.0}; r,_,_,tu=_run_residual_deep_variant(prices,us,jp,start,end,v,mode,"simple"); bench_rows.append({"benchmark_mode":mode_name,"variant":v["name"],**metrics(r),"Turnover":tu.turnover.mean()})
+    bench_cmp=pd.DataFrame(bench_rows)
+    summary.to_csv(out/"variant_summary.csv"); summary.to_json(out/"variant_summary.json",orient="index",indent=2); annual.to_csv(out/"annual_returns.csv"); monthly.to_csv(out/"monthly_returns.csv"); draw.to_csv(out/"drawdown_series.csv"); turnover.to_csv(out/"turnover.csv",index=False); selected.to_csv(out/"selected_tickers.csv",index=False); diff.to_csv(out/"selection_diff.csv",index=False); score_components.to_csv(out/"score_components.csv",index=False); bench_cmp.to_csv(out/"benchmark_sensitivity.csv",index=False); method_cmp.to_csv(out/"residual_method_comparison.csv",index=False)
+    meta={"generated_at":pd.Timestamp.now("UTC").isoformat(),"data_start":str(prices.index.min().date()),"data_end":str(prices.index.max().date()),"rebalance_frequency":"quarterly / about every 90 days","ttl_days":90,"universe_size":{"US":len(us),"JP":len(jp)},"variants":list(variants),"residual_weights_tested":list(RESIDUAL_DEEP_WEIGHTS),"residual_methods_tested":["simple","beta_adjusted"],"benchmark_modes_tested":list(modes),"whether_exit_protocol_used":False,"whether_regime_filter_used":False,"whether_vcp_used":False,"notes_on_missing_data":"Missing benchmarks/residual inputs fall back to neutral scores; demo mode is deterministic and network-free."}; (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
+    base=summary.loc["Baseline"]; best_name=summary.drop(index="Baseline").sort_values("Calmar",ascending=False).index[0]; best=summary.loc[best_name]; zone=summary.loc[["Residual_10","Residual_15","Residual_20","Residual_25"]]
+    view=summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Sortino","Calmar","Turnover","Judgment"]]
+    table="| Variant | " + " | ".join(view.columns) + " |\n| --- | " + " | ".join(["---"]*len(view.columns)) + " |\n" + "\n".join("| " + str(idx) + " | " + " | ".join((f"{x:.4f}" if isinstance(x,(int,float,np.floating)) and pd.notna(x) else str(x)) for x in row) + " |" for idx,row in view.iterrows())
+    report=f"""# Residual Momentum Deep Audit Report
+
+## Executive Summary
+Best non-baseline by Calmar was **{best_name}**. Baseline CAGR {base.CAGR:.2%}, MaxDD {base.Max_Drawdown:.2%}, Calmar {base.Calmar:.2f}; {best_name} CAGR {best.CAGR:.2%}, MaxDD {best.Max_Drawdown:.2%}, Calmar {best.Calmar:.2f}. Residual_20 is evaluated as one point inside the Residual_10-25 zone, not as a production rule. Production use still requires live/free-data validation.
+
+## Baseline Reminder
+TTL 90 days, quarterly / four trades per year, no Exit Protocol, no Regime Filter, no VCP, no stop loss, no discretionary cash retreat.
+
+## CLI
+`python alpha_engine_backtest.py --demo --audit residual_momentum_deep --output-dir artifacts/residual_momentum_deep`
+
+## Residual Weight Sweep Summary
+{table}
+
+Improvement zone Residual_10-25 average Calmar {zone.Calmar.mean():.2f} versus Baseline {base.Calmar:.2f}; evaluate stability across the CSVs rather than selecting a single lucky point.
+
+## Residual Method Comparison
+Both simple benchmark-adjusted residual and beta-adjusted residual are implemented. See `artifacts/residual_momentum_deep/residual_method_comparison.csv`; beta-adjusted falls back safely when benchmark variance/history is insufficient.
+
+## Benchmark Sensitivity
+Modes tested: broad_default, growth_adjusted_us, index_alt_jp, strict_available_default. See `benchmark_sensitivity.csv`; this checks whether Residual_15/20/25 depend excessively on SPY/QQQ or TOPIX/Nikkei choices.
+
+## Year / Period Review
+Annual returns include 2020, 2022, 2023, 2024 and 2025 where present in `annual_returns.csv`. This is post-analysis only; no regime trading filter or cash retreat is introduced.
+
+## Selection Difference Review
+`selection_diff.csv` compares Baseline against Residual_10/15/20/25/30 and other residual weights by rebalance date. `score_components.csv` lists base_score, residual_score, final_score, stock/benchmark returns, benchmark_used, method, selected_flag, and weights.
+
+## Risk Review
+Use MaxDD, Worst Year, monthly returns, drawdown_series, turnover, and 2022 annual returns. Calmar is emphasized because the research question is return efficiency versus maximum loss.
+
+## Recommendation
+Continue researching Residual Momentum only if the Residual_10-25 zone improves Calmar/MaxDD without unacceptable CAGR or turnover cost. Do not change production Alpha Engine from this demo/free-data audit alone; live/free-data validation is required.
+
+## Safety Notes
+This is not investment advice. Historical yfinance/Wikipedia/free-data tests do not guarantee future returns. Free data can contain missing values, delays, adjusted-price issues, index membership bias, and survivorship bias; this is framed as an individual-investor free-data audit.
+"""
+    Path("reports/residual_momentum_deep_audit_report.md").write_text(report,encoding="utf-8")
+    return summary
+
+
 def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     out=Path(out); out.mkdir(parents=True,exist_ok=True); selected.to_csv(out/"selected_tickers_by_period.csv",index=False); turnover.to_csv(out/"turnover_report.csv",index=False)
     allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
@@ -244,11 +384,13 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         us,jp=get_live_universe(); requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="residual_momentum_deep":
+        summary=run_residual_momentum_deep_audit(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="minervini_lens":
         summary=run_minervini_lens_audit(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     s,sel,t=run_backtest(p,us,jp,args.start,args.end); b={k:p[v].pct_change().loc[args.start:args.end].fillna(0) for k,v in BENCHMARKS.items() if v in p}; summary,verdict=write_outputs(args.output_dir,s,sel,t,b)

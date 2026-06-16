@@ -1,0 +1,64 @@
+{
+  "generated_at": "2026-06-16T10:43:49.045257+00:00",
+  "data_start": "2018-01-01",
+  "data_end": "2025-12-31",
+  "rebalance_frequency": "quarterly / about every 90 days",
+  "ttl_days": 90,
+  "universe_size": {
+    "US": 8,
+    "JP": 8
+  },
+  "variants": [
+    {
+      "name": "Baseline",
+      "base_weight": 1.0,
+      "residual_weight": 0.0,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_20",
+      "base_weight": 0.8,
+      "residual_weight": 0.2,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "Residual_30",
+      "base_weight": 0.7,
+      "residual_weight": 0.3,
+      "vcp_weight": 0.0
+    },
+    {
+      "name": "VCP_10",
+      "base_weight": 0.9,
+      "residual_weight": 0.0,
+      "vcp_weight": 0.1
+    },
+    {
+      "name": "VCP_20",
+      "base_weight": 0.8,
+      "residual_weight": 0.0,
+      "vcp_weight": 0.2
+    },
+    {
+      "name": "Residual_20_VCP_10",
+      "base_weight": 0.7,
+      "residual_weight": 0.2,
+      "vcp_weight": 0.1
+    },
+    {
+      "name": "Residual_30_VCP_10",
+      "base_weight": 0.6,
+      "residual_weight": 0.3,
+      "vcp_weight": 0.1
+    },
+    {
+      "name": "Residual_20_VCP_20",
+      "base_weight": 0.6,
+      "residual_weight": 0.2,
+      "vcp_weight": 0.2
+    }
+  ],
+  "whether_exit_protocol_used": false,
+  "whether_regime_filter_used": false,
+  "notes_on_missing_data": "Missing lens inputs are neutralized where possible; insufficient base history follows existing score_universe rules."
+}

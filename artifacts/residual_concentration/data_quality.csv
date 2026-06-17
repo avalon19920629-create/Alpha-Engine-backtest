@@ -1,0 +1,21 @@
+metric,value
+requested_tickers,16
+successfully_downloaded_tickers,16
+failed_tickers,0
+insufficient_history_tickers,0
+excluded_tickers,0
+final_usable_universe_size,16
+us_usable_count,8
+jp_usable_count,8
+data_start,2018-01-01
+data_end,2025-12-31
+usable_start,2019-01-01
+usable_end,2020-12-31
+benchmark_broad_default,"{'US': 'SPY', 'JP': '1306.T'}"
+benchmark_growth_adjusted_us,"{'US': 'QQQ', 'JP': '1306.T'}"
+benchmark_index_alt_jp,"{'US': 'SPY', 'JP': '^N225'}"
+benchmark_strict_available_default,"{'US': 'SPY', 'JP': '1306.T'}"
+cache_used,False
+cache_source,provided_prices
+cache_path,artifacts/residual_concentration/cache
+cache_created_at,

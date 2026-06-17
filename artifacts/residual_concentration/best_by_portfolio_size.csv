@@ -1,0 +1,11 @@
+total_holdings,best_cagr_ratio,best_sharpe_ratio,best_sortino_ratio,best_calmar_ratio,lowest_maxdd_ratio
+40,Baseline_N40,Baseline_N40,Residual_65_N40,Baseline_N40,Baseline_N40
+30,Baseline_N30,Baseline_N30,Residual_65_N30,Baseline_N30,Baseline_N30
+24,Baseline_N24,Baseline_N24,Residual_65_N24,Baseline_N24,Baseline_N24
+20,Baseline_N20,Baseline_N20,Residual_65_N20,Baseline_N20,Baseline_N20
+16,Baseline_N16,Baseline_N16,Residual_65_N16,Baseline_N16,Baseline_N16
+12,Baseline_N12,Baseline_N12,Baseline_N12,Residual_70_N12,Residual_70_N12
+10,Residual_50_N10,Residual_50_N10,Residual_50_N10,Residual_50_N10,Residual_50_N10
+8,Residual_55_N8,Residual_55_N8,Residual_55_N8,Residual_50_N8,Residual_50_N8
+6,Baseline_N6,Baseline_N6,Baseline_N6,Baseline_N6,Baseline_N6
+4,Residual_50_N4,Residual_50_N4,Residual_50_N4,Baseline_N4,Baseline_N4

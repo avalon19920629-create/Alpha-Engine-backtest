@@ -1,0 +1,8 @@
+residual_variant,best_cagr_portfolio_size,best_sharpe_portfolio_size,best_sortino_portfolio_size,best_calmar_portfolio_size,lowest_maxdd_portfolio_size
+Baseline,6,40,40,40,40
+Residual_100,40,40,40,40,40
+Residual_50,6,40,40,40,40
+Residual_55,8,40,40,40,40
+Residual_60,8,40,40,40,40
+Residual_65,8,40,40,40,40
+Residual_70,40,40,40,40,40

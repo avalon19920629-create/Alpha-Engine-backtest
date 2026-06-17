@@ -780,6 +780,222 @@ This is not investment advice. Historical tests do not guarantee future returns.
     Path("reports/residual_full_sweep_report.md").write_text(report,encoding="utf-8")
 
 
+
+
+RESIDUAL_CONCENTRATION_WEIGHTS=(0.0,0.50,0.55,0.60,0.65,0.70,1.00)
+RESIDUAL_CONCENTRATION_SIZES=((40,20,20),(30,15,15),(24,12,12),(20,10,10),(16,8,8),(12,6,6),(10,5,5),(8,4,4),(6,3,3),(4,2,2))
+
+
+def build_portfolio_size_configs():
+    """Build fixed US/JP-balanced portfolio-size configs for concentration audit."""
+    return tuple({"total_holdings":n,"us_holdings":u,"jp_holdings":j,"is_high_diversification_reference":n in (30,40)} for n,u,j in RESIDUAL_CONCENTRATION_SIZES)
+
+
+def build_residual_concentration_variants(residual_weights=RESIDUAL_CONCENTRATION_WEIGHTS, portfolio_configs=None):
+    """Build Residual ratio x portfolio-size matrix; Baseline_N12 preserves current 6+6 base-only logic."""
+    portfolio_configs=tuple(portfolio_configs or build_portfolio_size_configs()); out=[]
+    for w in residual_weights:
+        for cfg in portfolio_configs:
+            prefix="Baseline" if w==0 else f"Residual_{int(round(w*100)):02d}"
+            out.append({**cfg,"name":f"{prefix}_N{cfg['total_holdings']}","residual_variant":prefix,"base_weight":round(1-w,2),"residual_weight":round(w,2),"vcp_weight":0.0})
+    return tuple(out)
+
+
+def run_residual_concentration_variant(prices,us,jp,start,end,variant,benchmark_mode=None,method="simple"):
+    prices=prices.sort_index(); rets=prices.pct_change(); dates=rebalance_dates(prices.index,start,end)
+    out=pd.Series(0.,index=prices.loc[start:end].index); records=[]; scores=[]; turns=[]; prev={}
+    for i,t in enumerate(dates):
+        future=prices.index[prices.index>t]
+        if not len(future): continue
+        trade=future[0]; next_t=dates[i+1] if i+1<len(dates) else pd.Timestamp(end); hold=out.index[(out.index>=trade)&(out.index<=next_t)]
+        frames=[]
+        for region,tickers,topn in (("US",us,variant["us_holdings"]),("JP",jp,variant["jp_holdings"])):
+            base=score_universe(prices,[x for x in tickers if x in prices],t)
+            residual=compute_residual_momentum_score(prices,base.index,t,region,benchmark_mode=benchmark_mode,method=method)
+            d=combine_residual_score(base,residual,variant).head(topn).copy(); d["Region"]=region; frames.append(d)
+        p=pd.concat(frames) if any(not x.empty for x in frames) else pd.DataFrame()
+        if not p.empty:
+            inv=1/p.Volatility; p["Weight"]=inv/inv.sum()
+        weights=p.Weight.to_dict() if not p.empty else {}
+        out.loc[hold]=rets.reindex(hold)[list(weights)].mul(pd.Series(weights)).sum(axis=1) if weights else 0.
+        turns.append({"variant":variant["name"],"screen_date":t,"trade_date":trade,"turnover":sum(abs(weights.get(k,0)-prev.get(k,0)) for k in set(weights)|set(prev))/2,"total_holdings":variant["total_holdings"],"us_holdings":variant["us_holdings"],"jp_holdings":variant["jp_holdings"]}); prev=weights
+        hist=asof_prices(prices,t).ffill()
+        for ticker,row in p.iterrows():
+            region=row.get("Region"); bench=_resolve_benchmark(hist,region,benchmark_mode)
+            rec={"variant":variant["name"],"screen_date":t,"trade_date":trade,"ticker":ticker,"total_holdings":variant["total_holdings"],"us_holdings":variant["us_holdings"],"jp_holdings":variant["jp_holdings"],**row.to_dict()}; records.append(rec)
+            scores.append({"date":t,"ticker":ticker,"market":region,"variant":variant["name"],"total_holdings":variant["total_holdings"],"us_holdings":variant["us_holdings"],"jp_holdings":variant["jp_holdings"],"base_score":row.get("base_score"),"residual_score":row.get("residual_score"),"final_score":row.get("Final_Score"),"residual_weight":variant["residual_weight"],"base_weight":variant["base_weight"],"stock_return_3m":_window_return(hist,ticker,63),"stock_return_6m":_window_return(hist,ticker,126),"stock_return_12m":_window_return(hist,ticker,252),"benchmark_return_3m":_window_return(hist,bench,63),"benchmark_return_6m":_window_return(hist,bench,126),"benchmark_return_12m":_window_return(hist,bench,252),"residual_return_3m":_window_return(hist,ticker,63)-_window_return(hist,bench,63) if bench else np.nan,"residual_return_6m":_window_return(hist,ticker,126)-_window_return(hist,bench,126) if bench else np.nan,"residual_return_12m":_window_return(hist,ticker,252)-_window_return(hist,bench,252) if bench else np.nan,"benchmark_used":bench,"residual_method":method,"selected_flag":True,"weight":row.get("Weight")})
+    return out,pd.DataFrame(records),pd.DataFrame(scores),pd.DataFrame(turns)
+
+
+def compute_concentration_diagnostics(selected):
+    rows=[]
+    if selected.empty or "Weight" not in selected: return pd.DataFrame(rows)
+    for v,g in selected.groupby("variant"):
+        by=g.groupby("screen_date"); maxw=by.Weight.max(); hhi=by.Weight.apply(lambda x: float((x**2).sum())); top3=by.Weight.apply(lambda x: float(x.sort_values(ascending=False).head(3).sum()))
+        rows.append({"variant":v,"average_number_of_holdings":by.ticker.nunique().mean(),"average_max_single_name_weight":maxw.mean(),"max_observed_single_name_weight":maxw.max(),"average_portfolio_herfindahl_index":hhi.mean(),"average_top_3_weight":top3.mean(),"highest_concentration_date":str(maxw.idxmax()) if len(maxw) else ""})
+    return pd.DataFrame(rows)
+
+
+def _variant_parts(name):
+    a,b=str(name).rsplit("_N",1); return a,int(b)
+
+
+def compute_best_by_portfolio_size(summary):
+    w=summary.copy(); w["residual_variant"]=[_variant_parts(i)[0] for i in w.index]; w["total_holdings"]=[_variant_parts(i)[1] for i in w.index]; rows=[]
+    for n,g in w.groupby("total_holdings"):
+        rows.append({"total_holdings":n,"best_cagr_ratio":g.CAGR.idxmax(),"best_sharpe_ratio":g.Sharpe.idxmax(),"best_sortino_ratio":g.Sortino.idxmax(),"best_calmar_ratio":g.Calmar.idxmax(),"lowest_maxdd_ratio":g.Max_Drawdown.abs().idxmin()})
+    return pd.DataFrame(rows).sort_values("total_holdings",ascending=False)
+
+
+def compute_best_by_residual_ratio(summary):
+    w=summary.copy(); w["residual_variant"]=[_variant_parts(i)[0] for i in w.index]; w["total_holdings"]=[_variant_parts(i)[1] for i in w.index]; rows=[]
+    for rv,g in w.groupby("residual_variant"):
+        rows.append({"residual_variant":rv,"best_cagr_portfolio_size":_variant_parts(g.CAGR.idxmax())[1],"best_sharpe_portfolio_size":_variant_parts(g.Sharpe.idxmax())[1],"best_sortino_portfolio_size":_variant_parts(g.Sortino.idxmax())[1],"best_calmar_portfolio_size":_variant_parts(g.Calmar.idxmax())[1],"lowest_maxdd_portfolio_size":_variant_parts(g.Max_Drawdown.abs().idxmin())[1]})
+    return pd.DataFrame(rows)
+
+
+def compute_sweet_spot_analysis(summary):
+    base=summary.loc["Baseline_N12"] if "Baseline_N12" in summary.index else summary.iloc[0]
+    rows=[]
+    for name,row in summary.iterrows():
+        n=_variant_parts(name)[1]; simultaneous=row.CAGR>base.CAGR and abs(row.Max_Drawdown)<abs(base.Max_Drawdown) and row.Calmar>base.Calmar
+        judgment="strong improvement" if simultaneous and row.Sharpe>base.Sharpe and row.Sortino>base.Sortino else ("clear improvement" if row.Calmar>base.Calmar and row.CAGR>=base.CAGR*.98 and abs(row.Max_Drawdown)<=abs(base.Max_Drawdown)*1.05 else ("mixed" if row.CAGR>base.CAGR or row.Calmar>base.Calmar else "worse"))
+        rows.append({"variant":name,"total_holdings":n,"cagr_delta_vs_baseline_n12":row.CAGR-base.CAGR,"maxdd_abs_delta_vs_baseline_n12":abs(row.Max_Drawdown)-abs(base.Max_Drawdown),"calmar_delta_vs_baseline_n12":row.Calmar-base.Calmar,"simultaneous_cagr_maxdd_calmar_improvement":simultaneous,"zone":"concentration" if n<12 else "current" if n==12 else "diversification" if n<30 else "high_diversification_reference","judgment":judgment})
+    return pd.DataFrame(rows)
+
+
+def compute_diversification_reference_analysis(summary):
+    rows=[]
+    for rv in sorted({_variant_parts(i)[0] for i in summary.index}):
+        base_name=f"{rv}_N12"
+        if base_name not in summary.index: continue
+        base=summary.loc[base_name]
+        for n in (4,6,8,10,16,20,24,30,40):
+            name=f"{rv}_N{n}"
+            if name in summary.index:
+                row=summary.loc[name]; rows.append({"residual_variant":rv,"comparison":f"N12_vs_N{n}","variant":name,"cagr_delta":row.CAGR-base.CAGR,"maxdd_abs_delta":abs(row.Max_Drawdown)-abs(base.Max_Drawdown),"vol_delta":row.Annualized_Volatility-base.Annualized_Volatility,"calmar_delta":row.Calmar-base.Calmar,"role":"high_diversification_reference" if n in (30,40) else "practical_diversification" if n>12 else "concentration_reference"})
+    return pd.DataFrame(rows)
+
+
+def compare_concentration_selection_diff(selected,score_components):
+    detailed=_selection_diff_detailed(selected,score_components)
+    if detailed.empty or "variant" not in detailed: return detailed
+    keep={"Residual_60_N12","Residual_60_N10","Residual_60_N8","Residual_65_N12","Residual_65_N10","Residual_65_N8","Residual_65_N20","Residual_65_N24","Residual_100_N12","Residual_100_N8","Residual_100_N20"}
+    return detailed[detailed.variant.isin(keep)].copy()
+
+
+def _empty_concentration_outputs(out,variants,dq,failures,meta):
+    idx=[v["name"] for v in variants]; cols=["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Sortino","Calmar","Total_Return","Best_Year","Worst_Year","Monthly_Win_Rate","Turnover","Number_of_Rebalances","Judgment"]
+    summary=pd.DataFrame(index=idx,columns=cols); summary.index.name="Variant"; summary["Judgment"]="skipped_no_usable_data"
+    empty=pd.DataFrame(); conc=compute_concentration_diagnostics(empty); bps=compute_best_by_portfolio_size(summary); brr=compute_best_by_residual_ratio(summary); sweet=compute_sweet_spot_analysis(summary); div=compute_diversification_reference_analysis(summary)
+    for name,df in (("variant_summary.csv",summary),("annual_returns.csv",empty),("monthly_returns.csv",empty),("drawdown_series.csv",empty),("turnover.csv",empty),("selected_tickers.csv",empty),("selection_diff.csv",empty),("score_components.csv",empty),("data_quality.csv",dq),("download_failures.csv",failures),("concentration_diagnostics.csv",conc),("best_by_portfolio_size.csv",bps),("best_by_residual_ratio.csv",brr),("sweet_spot_analysis.csv",sweet),("diversification_reference_analysis.csv",div)):
+        df.to_csv(out/name,index=(name in ("variant_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv")))
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2); return summary,conc,bps,brr,sweet,div
+
+
+def run_residual_concentration_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/residual_concentration",downloader=None):
+    """Run Residual Core x Portfolio Concentration audit (70 variants, quarterly, no exit/regime/VCP)."""
+    import json
+    end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True)
+    if us is None or jp is None: us,jp=get_live_universe()
+    us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]
+    modes=build_benchmark_modes(); bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals}); variants=build_residual_concentration_variants(); requested=list(dict.fromkeys([*us,*jp])); failures=pd.DataFrame(columns=["ticker","reason"]); cache_meta={"cache_used":False,"cache_path":str(out/"cache"),"cache_source":"provided_prices"}
+    if prices is None:
+        source=Path("artifacts/residual_full_sweep/cache")
+        ok,reason=validate_price_cache(source,start,end,requested,bench_tickers) if source.exists() else (False,"missing_prior_cache")
+        if ok:
+            prices,bench=load_price_cache(source); prices=pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(); cache_meta={"cache_used":True,"cache_source":str(source),"cache_path":str(source),"cache_status":"prior_full_sweep_hit"}
+        else:
+            prices,failures,requested,cache_meta=build_price_cache(requested,bench_tickers,start,end,out/"cache",downloader=downloader); cache_meta["cache_source"]="download_or_local_cache"
+    else:
+        pd.DataFrame({"ticker":[*us,*jp]}).to_csv(out/"cache"/"universe.csv",index=False)
+        prices.to_pickle(out/"cache"/"prices.pkl"); prices[[c for c in bench_tickers if c in prices.columns]].to_pickle(out/"cache"/"benchmarks.pkl")
+        (out/"cache"/"cache_metadata.json").write_text(json.dumps({**_cache_metadata(start,end,[*us,*jp],bench_tickers),**cache_meta},indent=2,default=str),encoding="utf-8")
+    benchmark_status={name:{region:_resolve_benchmark(prices,region,mode) for region in ("US","JP")} for name,mode in modes.items()}
+    dq,insufficient,excluded,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end,benchmark_status={k:str(v) for k,v in benchmark_status.items()})
+    dq=pd.concat([dq,pd.DataFrame([{"metric":"cache_used","value":cache_meta.get("cache_used",False)},{"metric":"cache_source","value":cache_meta.get("cache_source","")},{"metric":"cache_path","value":cache_meta.get("cache_path","")},{"metric":"cache_created_at","value":cache_meta.get("created_at","")}])],ignore_index=True)
+    us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
+    meta={"generated_at":pd.Timestamp.now("UTC").isoformat(),"data_start":str(prices.index.min().date()) if len(prices.index) else "","data_end":str(prices.index.max().date()) if len(prices.index) else "","usable_start":str(pd.Timestamp(start).date()),"usable_end":str(pd.Timestamp(end).date()),"rebalance_frequency":"quarterly / about every 90 days","ttl_days":90,"universe_size_requested":len(requested),"universe_size_downloaded":len([t for t in requested if t in prices.columns]),"universe_size_usable":len(usable),"us_usable_count":len(us_usable),"jp_usable_count":len(jp_usable),"residual_ratios_tested":list(RESIDUAL_CONCENTRATION_WEIGHTS),"portfolio_sizes_tested":[c[0] for c in RESIDUAL_CONCENTRATION_SIZES],"variant_count":len(variants),"residual_method":"simple","benchmark_mode":"broad_default","cache_used":cache_meta.get("cache_used",False),"cache_source":cache_meta.get("cache_source",""),"cache_path":cache_meta.get("cache_path",str(out/"cache")),"whether_exit_protocol_used":False,"whether_regime_filter_used":False,"whether_vcp_used":False,"whether_sector_residual_used":False,"whether_downside_penalty_used":False,"whether_correlation_penalty_used":False,"data_source":"yfinance / Wikipedia / existing free universe" if prices is None else "provided/demo prices","notes_on_missing_data":"Failed/insufficient tickers are logged and excluded; missing residual inputs are neutralized.","notes_on_survivorship_bias":"Current free-data universes may be applied backward; historical constituent bias and survivorship bias remain.","notes_on_portfolio_size_reference":"N4/N6 are concentration limit tests; N30/N40 are high-diversification references, not production recommendations.","notes_on_high_diversification_reference":"High-diversification variants test signal dilution versus individual-stock risk reduction."}
+    if prices.empty or not (us_usable or jp_usable):
+        summary,conc,bps,brr,sweet,div=_empty_concentration_outputs(out,variants,dq,failures,meta); (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8"); write_residual_concentration_report(summary,dq,meta,conc,bps,brr,sweet,div,out); return summary
+    returns={}; selected=[]; scores=[]; turns=[]; default_mode=modes["broad_default"]
+    for v in variants:
+        r,sel,sc,tu=run_residual_concentration_variant(prices,us_usable,jp_usable,start,end,v,default_mode,"simple"); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu)
+    selected=pd.concat(selected,ignore_index=True); score_components=pd.concat(scores,ignore_index=True); turnover=pd.concat(turns,ignore_index=True); summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name="Variant"; summary["Turnover"]=turnover.groupby("variant").turnover.mean(); summary["Number_of_Rebalances"]=turnover.groupby("variant").size(); base_for_judge=summary.loc["Baseline_N12"]; summary["Judgment"]=[("baseline" if idx=="Baseline_N12" else _judge(row.rename("Baseline" if idx=="Baseline_N12" else idx),base_for_judge)) for idx,row in summary.iterrows()]
+    annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()})
+    conc=compute_concentration_diagnostics(selected); bps=compute_best_by_portfolio_size(summary); brr=compute_best_by_residual_ratio(summary); sweet=compute_sweet_spot_analysis(summary); div=compute_diversification_reference_analysis(summary); diff=compare_concentration_selection_diff(selected,score_components)
+    for name,df in (("variant_summary.csv",summary),("annual_returns.csv",annual),("monthly_returns.csv",monthly),("drawdown_series.csv",draw),("turnover.csv",turnover),("selected_tickers.csv",selected),("selection_diff.csv",diff),("score_components.csv",score_components),("data_quality.csv",dq),("download_failures.csv",failures),("concentration_diagnostics.csv",conc),("best_by_portfolio_size.csv",bps),("best_by_residual_ratio.csv",brr),("sweet_spot_analysis.csv",sweet),("diversification_reference_analysis.csv",div)):
+        df.to_csv(out/name,index=(name in ("variant_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv")))
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2)
+    conc_slice=summary[[ _variant_parts(i)[1] in (8,10) for i in summary.index]]; high_slice=summary[[ _variant_parts(i)[1] in (30,40) for i in summary.index]]
+    meta.update({"best_cagr_variant":summary.CAGR.idxmax(),"best_sharpe_variant":summary.Sharpe.idxmax(),"best_sortino_variant":summary.Sortino.idxmax(),"best_calmar_variant":summary.Calmar.idxmax(),"lowest_maxdd_variant":summary.Max_Drawdown.abs().idxmin(),"best_balanced_variant":sweet.sort_values(["judgment","calmar_delta_vs_baseline_n12"],ascending=[True,False]).variant.iloc[0] if not sweet.empty else None,"best_concentration_variant":conc_slice.Calmar.idxmax() if not conc_slice.empty else None,"best_high_diversification_reference_variant":high_slice.Calmar.idxmax() if not high_slice.empty else None})
+    (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8"); write_residual_concentration_report(summary,dq,meta,conc,bps,brr,sweet,div,out); return summary
+
+
+def write_residual_concentration_report(summary,data_quality,metadata,conc,bps,brr,sweet,div,output_dir="artifacts/residual_concentration"):
+    Path("reports").mkdir(exist_ok=True)
+    if "Baseline_N12" in summary.index and summary.CAGR.notna().any():
+        base=summary.loc["Baseline_N12"]; best_name=metadata.get("best_calmar_variant") or summary.Calmar.idxmax(); best=summary.loc[best_name]
+        headline=f"Best Calmar variant was **{best_name}**. Baseline_N12 CAGR {base.CAGR:.2%}, MaxDD {base.Max_Drawdown:.2%}, Calmar {base.Calmar:.2f}; {best_name} CAGR {best.CAGR:.2%}, MaxDD {best.Max_Drawdown:.2%}, Calmar {best.Calmar:.2f}."
+    else: headline="No usable data was available; generated files are structural skipped outputs."
+    view=summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Sortino","Calmar","Turnover","Judgment"] if c in summary.columns]]
+    report=f"""# Residual Core Portfolio Concentration Audit Report
+
+## 1. Executive Summary
+{headline} This audit fixes Residual Momentum as the tested core signal and varies only residual ratio and balanced US/JP portfolio size. N30/N40 are high-diversification reference points, not practical production recommendations. If improvements are not robust across neighboring variants, production adoption should be deferred.
+
+## 2. Baseline Reminder
+TTL 90 days, quarterly/four trades per year, no Exit Protocol, no Regime Filter, no VCP Proxy, no Sector Residual, no Downside penalty, no Correlation penalty. Baseline_N12 is base_weight=1.0, residual_weight=0.0, US 6 / JP 6.
+
+## CLI
+`python alpha_engine_backtest.py --audit residual_concentration --output-dir artifacts/residual_concentration`
+
+`python alpha_engine_backtest.py --demo --audit residual_concentration --output-dir artifacts/residual_concentration`
+
+## 3. Why Portfolio Size Matters
+The current 12-stock structure is a practical balance, not a proof of optimality. This audit compares N4/N6 concentration limits, N8/N10 concentration candidates, current N12, N16/N20/N24 practical diversification, and N30/N40 high-diversification references to study Residual signal purity versus single-name accident risk.
+
+## 4. Data Quality Summary
+{_markdown_table(data_quality.set_index('metric') if isinstance(data_quality,pd.DataFrame) and not data_quality.empty else pd.DataFrame())}
+
+Cache used: {metadata.get('cache_used')} / source: `{metadata.get('cache_source')}` / path: `{metadata.get('cache_path')}`. Survivorship and current-constituent bias remain when historical constituents are not reconstructed.
+
+## 5. Variant Summary
+{_markdown_table(view)}
+
+## 6. Best by Portfolio Size
+{_markdown_table(bps.set_index('total_holdings') if isinstance(bps,pd.DataFrame) and not bps.empty else pd.DataFrame())}
+
+## 7. Best by Residual Ratio
+{_markdown_table(brr.set_index('residual_variant') if isinstance(brr,pd.DataFrame) and not brr.empty else pd.DataFrame())}
+
+## 8. Sweet Spot Analysis
+{_markdown_table(sweet.head(30).set_index('variant') if isinstance(sweet,pd.DataFrame) and not sweet.empty else pd.DataFrame())}
+
+## 9. Diversification Reference Review
+{_markdown_table(div.head(40).set_index(['residual_variant','comparison']) if isinstance(div,pd.DataFrame) and not div.empty else pd.DataFrame())}
+
+## 10. Concentration Risk Review
+{_markdown_table(conc.set_index('variant') if isinstance(conc,pd.DataFrame) and not conc.empty else pd.DataFrame())}
+
+## 11. Year / Period Review
+Use `annual_returns.csv`, `monthly_returns.csv`, and `drawdown_series.csv` for 2020, 2022, 2023, 2024, 2025, and 2026 YTD where present. This is post-analysis only and does not introduce any regime rule.
+
+## 12. Selection Difference Review
+`selection_diff.csv` compares Baseline_N12 with Residual_60/65/100 concentration and diversification variants. `score_components.csv` records base_score, residual_score, final_score, stock/benchmark/residual returns, benchmark_used, selected_flag, and weights.
+
+## 13. Risk Review
+Prioritize MaxDD, Worst Year, Worst Month/monthly returns, drawdowns, turnover, average/max single-name weight, Herfindahl index, and 2022 behavior. N4/N6 are limit tests; N30/N40 test whether diversification dilutes Residual signal.
+
+## 14. Recommendation
+Conservative candidate: strongest N12/N16/N20 variant with improved Calmar and acceptable MaxDD. Balanced candidate: best stable neighborhood around Residual_55/60/65. Aggressive candidate: best N8/N10 only if MaxDD and single-name weights remain acceptable. High-diversification reference candidate: best N30/N40 by Calmar, treated as reference only. Use actual CSVs before production; do not adopt a single isolated best point.
+
+## 15. Safety Notes
+This is not investment advice. Historical yfinance/Wikipedia/free-data tests do not guarantee future returns. Free data can contain missing values, delays, adjusted-price issues, survivorship bias, and historical constituent bias. Alpha Engine is an alpha sleeve, not an all-asset portfolio.
+"""
+    Path("reports/residual_concentration_report.md").write_text(report,encoding="utf-8")
+
+
 def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     out=Path(out); out.mkdir(parents=True,exist_ok=True); selected.to_csv(out/"selected_tickers_by_period.csv",index=False); turnover.to_csv(out/"turnover_report.csv",index=False)
     allr=dict(strategies); allr.update(benchmarks or {}); summary=pd.DataFrame({k:metrics(v) for k,v in allr.items()}).T; summary.index.name="Strategy"; summary["Turnover"]=np.nan; summary.loc[list(strategies),"Turnover"]=turnover.turnover.mean() if not turnover.empty else 0; summary.to_csv(out/"backtest_summary.csv")
@@ -790,16 +1006,20 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         us,jp=get_live_universe()
+        if args.audit=="residual_concentration":
+            summary=run_residual_concentration_audit(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         if args.audit=="residual_full_sweep":
             summary=run_residual_full_sweep(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         if args.audit=="residual_live_validation":
             summary=run_residual_live_validation(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="residual_concentration":
+        summary=run_residual_concentration_audit(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_full_sweep":
         summary=run_residual_full_sweep(p,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_live_validation":

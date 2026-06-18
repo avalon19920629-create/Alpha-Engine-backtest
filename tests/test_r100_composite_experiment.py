@@ -123,7 +123,7 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
         prices=prices,
         us=us,
         jp=jp,
-        start="2018-01-01",
+        start="2020-01-01",
         end="2022-12-31",
         output_dir=out,
         variants=n6_variants,
@@ -133,7 +133,7 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
         prices=prices,
         us=us,
         jp=jp,
-        start="2018-01-01",
+        start="2020-01-01",
         end="2022-12-31",
         output_dir=out,
         resume=True,
@@ -147,9 +147,18 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
     assert "Residual_100_N6_TTL90_Renew30_Composite" in set(overdrive["variant"])
 
     stress = pd.read_csv(out / "r100_stress_year_2022.csv")
-    n6_stress = stress[stress["variant"].isin([
-        "Residual_100_N6_TTL90",
-        "Residual_100_N6_TTL90_Renew30_Composite",
-    ])]
-    assert len(n6_stress) == 2
-    assert not n6_stress.drop(columns=["variant"]).isna().all(axis=1).any()
+    assert list(stress["variant"]) == list(aeb.R100_DEFAULT_VARIANTS)
+    stress_metric_columns = [
+        "return_2022",
+        "max_drawdown_2022",
+        "worst_month_2022",
+        "monthly_win_rate_2022",
+        "average_active_exposure_2022",
+    ]
+    assert not stress[stress_metric_columns].isna().any().any()
+
+    composite_overdrive = overdrive[
+        overdrive["variant"].isin([v for v in aeb.R100_DEFAULT_VARIANTS if v.endswith("Composite")])
+    ]
+    assert len(composite_overdrive) == 4
+    assert not composite_overdrive["max_drawdown_2022"].isna().any()

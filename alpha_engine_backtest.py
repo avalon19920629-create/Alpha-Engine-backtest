@@ -1257,7 +1257,8 @@ def _stress_2022(monthly, draw, exposure, renewal, variants):
             rd_dates=pd.to_datetime(renewal["health_check_date"],errors="coerce")
             rd_df=renewal[(renewal.variant.astype(str)==v)&(rd_dates.dt.year==2022)]
         renewed_bool=rd_df.renewed.astype(str).str.lower().isin(["true","1","yes"]) if not rd_df.empty and "renewed" in rd_df else pd.Series(dtype=bool)
-        rows.append({"variant":v,"return_2022":float((1+m22).prod()-1) if len(m22) else np.nan,"max_drawdown_2022":float(d22.min()) if len(d22) else np.nan,"worst_month_2022":float(m22.min()) if len(m22) else np.nan,"monthly_win_rate_2022":float((m22>0).mean()) if len(m22) else np.nan,"average_active_exposure_2022":float(ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else np.nan,"renewal_pass_rate_2022":float(renewed_bool.mean()) if len(renewed_bool) else np.nan,"cash_weight_proxy_2022":float(1-ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else np.nan,"forced_non_renewals_2022":int((~renewed_bool).sum()) if len(renewed_bool) else 0})
+        avg_ex=float(ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else 0.0
+        rows.append({"variant":v,"return_2022":float((1+m22).prod()-1) if len(m22) else 0.0,"max_drawdown_2022":float(d22.min()) if len(d22) else 0.0,"worst_month_2022":float(m22.min()) if len(m22) else 0.0,"monthly_win_rate_2022":float((m22>0).mean()) if len(m22) else 0.0,"average_active_exposure_2022":avg_ex,"renewal_pass_rate_2022":float(renewed_bool.mean()) if len(renewed_bool) else np.nan,"cash_weight_proxy_2022":float(1-avg_ex),"forced_non_renewals_2022":int((~renewed_bool).sum()) if len(renewed_bool) else 0})
     out=pd.DataFrame(rows)
     pairs={"Residual_60_N12_TTL90_Renew30_Composite":"Residual_60_N12_TTL90","Residual_65_N12_TTL90_Renew30_Composite":"Residual_65_N12_TTL90"}
     for comp,base in pairs.items():
@@ -1492,15 +1493,31 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
     existing_exposure_summary=_r100_read_existing_output(out/"r100_active_exposure_summary.csv",selected) if resume else pd.DataFrame()
     existing_stress=_r100_read_existing_output(out/"r100_stress_year_2022.csv",selected) if resume else pd.DataFrame()
     existing_conc=_r100_read_existing_output(out/"r100_concentration_risk_summary.csv",selected) if resume else pd.DataFrame()
+    stress_metric_cols=["return_2022","max_drawdown_2022","worst_month_2022","monthly_win_rate_2022","average_active_exposure_2022"]
+    stress_rehydrate=set()
+    if resume and not existing_stress.empty and "variant" in existing_stress:
+        st_idx=existing_stress.drop_duplicates("variant",keep="last").set_index("variant")
+        for name in completed:
+            present_cols=[c for c in stress_metric_cols if c in st_idx.columns]
+            if name not in st_idx.index or not present_cols or st_idx.loc[name,present_cols].isna().any(): stress_rehydrate.add(name)
+    elif resume:
+        stress_rehydrate=set(completed)
     returns={}; selected_rows=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; partial_rows=partial_summary.reset_index().to_dict('records') if not partial_summary.empty else []; cost_rows=partial_cost.reset_index().to_dict('records') if not partial_cost.empty else []
     for v in vars_cfg:
-        if resume and v['name'] in completed: LOG.info("variant skip completed: %s",v['name']); continue
-        LOG.info("variant start: %s",v['name'])
+        rehydrate_completed=bool(resume and v['name'] in stress_rehydrate)
+        if resume and v['name'] in completed and not rehydrate_completed:
+            LOG.info("variant skip completed: %s",v['name']); continue
+        if rehydrate_completed:
+            LOG.info("variant rehydrate completed artifacts: %s",v['name'])
+        else:
+            LOG.info("variant start: %s",v['name'])
         r,sel,sc,tu,tr,hp,rd,ev=run_ttl_renewal_variant(prices,us_usable,jp_usable,start,end,v,default_mode,detail_logs=not no_detail_logs)
         returns[v['name']]=r; selected_rows.append(sel); turns.append(tu); trades.append(tr); holds.append(hp); decisions.append(rd); events.append(ev)
-        summ=metrics(r); summ.update({'Variant':v['name'],'Turnover':float(tu.turnover.mean()) if not tu.empty else np.nan}); partial_rows.append(summ)
-        nr,slip,tax=_cost_adjusted_returns(r,tu,tax_rate,slippage_bps); nm=metrics(nr); crow={'Variant':v['name'],'Slippage_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,0,slippage_bps)[0]),'Tax_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,tax_rate,0)[0]),'Tax_Slippage_Adjusted_CAGR':nm['CAGR'],'Estimated_Tax_Drag':summ['CAGR']-nm['CAGR'],'Estimated_Slippage_Drag':slip,'Net_Sharpe':nm['Sharpe'],'Net_Calmar':nm['Calmar']}; cost_rows.append(crow)
-        pd.DataFrame(partial_rows).to_csv(partial,index=False); pd.DataFrame(cost_rows).to_csv(costpartial,index=False); pd.DataFrame([{'variant':v['name'],'completed_at':pd.Timestamp.now('UTC').isoformat()}]).to_csv(cp,mode='a',header=not cp.exists(),index=False); LOG.info("partial output writing: %s",v['name']); LOG.info("variant end: %s",v['name'])
+        summ=metrics(r); summ.update({'Variant':v['name'],'Turnover':float(tu.turnover.mean()) if not tu.empty else np.nan})
+        nr,slip,tax=_cost_adjusted_returns(r,tu,tax_rate,slippage_bps); nm=metrics(nr); crow={'Variant':v['name'],'Slippage_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,0,slippage_bps)[0]),'Tax_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,tax_rate,0)[0]),'Tax_Slippage_Adjusted_CAGR':nm['CAGR'],'Estimated_Tax_Drag':summ['CAGR']-nm['CAGR'],'Estimated_Slippage_Drag':slip,'Net_Sharpe':nm['Sharpe'],'Net_Calmar':nm['Calmar']}
+        if not rehydrate_completed:
+            partial_rows.append(summ); cost_rows.append(crow)
+            pd.DataFrame(partial_rows).to_csv(partial,index=False); pd.DataFrame(cost_rows).to_csv(costpartial,index=False); pd.DataFrame([{'variant':v['name'],'completed_at':pd.Timestamp.now('UTC').isoformat()}]).to_csv(cp,mode='a',header=not cp.exists(),index=False); LOG.info("partial output writing: %s",v['name']); LOG.info("variant end: %s",v['name'])
     
     turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame()
     summary_new=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary_new.index.name='Variant'

@@ -1036,7 +1036,7 @@ def _health_row(prices,us,jp,date,ticker,region,variant,benchmark_mode=None):
 def _renewal_pass(protocol,h):
     return h["rank_pass"] if protocol=="rank" else h["residual_pass"] if protocol=="residual" else h["composite_pass"]
 
-def run_ttl_renewal_variant(prices,us,jp,start,end,variant,benchmark_mode=None):
+def run_ttl_renewal_variant(prices,us,jp,start,end,variant,benchmark_mode=None,detail_logs=True):
     prices=prices.sort_index(); idx=prices.loc[start:end].index; rets=prices.pct_change(); out=pd.Series(0.,index=idx); selected=[]; scores_lite=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; prev={}; t=_next_trade_date(prices.index,pd.Timestamp(start)); cycle=0
     while t is not None and t<=pd.Timestamp(end):
         screen=prices.index[prices.index<t][-1] if len(prices.index[prices.index<t]) else t
@@ -1044,12 +1044,12 @@ def run_ttl_renewal_variant(prices,us,jp,start,end,variant,benchmark_mode=None):
         base_end=_next_trade_date(prices.index,t+pd.Timedelta(days=variant["ttl_days"])); base_end=base_end if base_end is not None else prices.index[-1]
         final_end=base_end; active=dict(weights); protocol=variant.get("renewal_protocol")
         if protocol:
-            LOG.info("renewal health check start: %s %s",variant["name"],screen)
+            if detail_logs: LOG.info("renewal health check start: %s %s",variant["name"],screen)
             final_end=_next_trade_date(prices.index,t+pd.Timedelta(days=120)) or prices.index[-1]
             for ticker,row in p.iterrows():
                 h=_health_row(prices,us,jp,base_end,ticker,row.get("Region"),variant,benchmark_mode); ok=_renewal_pass(protocol,h); decisions.append({"variant":variant["name"],"ticker":ticker,"screen_date":screen,"trade_date":t,"health_check_date":base_end,"protocol":protocol,"renewed":ok,**h})
                 if not ok: active.pop(ticker,None)
-            LOG.info("renewal health check end: %s",variant["name"])
+            if detail_logs: LOG.info("renewal health check end: %s",variant["name"])
             # weekly degradation only for composite extension; non-pass becomes cash until normal 120-day cycle end
             if protocol=="composite" and active:
                 for wd in pd.date_range(base_end,final_end,freq="W-FRI"):
@@ -1112,7 +1112,11 @@ def run_ttl_renewal_audit(prices=None,us=None,jp=None,start="2015-01-01",end=Non
         LOG.info("variant start: %s ttl=%s renewal=%s",v["name"],v["ttl_days"],v.get("renewal_protocol") or "fixed")
         r,sel,sc,tu,tr,hp,rd,ev=run_ttl_renewal_variant(prices,us_usable,jp_usable,start,end,v,default_mode); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu); trades.append(tr); holds.append(hp); decisions.append(rd); events.append(ev)
         pd.DataFrame([{"variant":v["name"]}]).to_csv(cp,mode="a",header=not cp.exists(),index=False); LOG.info("variant end: %s",v["name"])
-    selected=pd.concat(selected,ignore_index=True) if selected else pd.DataFrame(); turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame(); score_components=pd.concat(scores,ignore_index=True) if scores else pd.DataFrame()
+    selected=pd.concat(selected,ignore_index=True) if selected else pd.DataFrame(); 
+    if resume and not returns:
+        LOG.info("resume found no variants to run; existing partial outputs retained")
+        return pd.DataFrame()
+    turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame(); score_components=pd.concat(scores,ignore_index=True) if scores else pd.DataFrame()
     summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name="Variant"
     if not turnover.empty: summary["Turnover"]=turnover.groupby("variant").turnover.mean(); summary["Annualized_Turnover"]=summary["Turnover"]*252/summary.index.map(lambda x: next((v["ttl_days"] for v in variants if v["name"]==x),90)); summary["Number_of_Rebalances"]=turnover.groupby("variant").size(); summary["Average_names_changed_per_rebalance"]=turnover.groupby("variant").names_changed.mean()
     if not holding_periods.empty: summary["Average_Holding_Days"]=holding_periods.groupby("variant").holding_days.mean(); summary["Median_Holding_Days"]=holding_periods.groupby("variant").holding_days.median(); summary["Max_Holding_Days"]=holding_periods.groupby("variant").holding_days.max(); summary["Trade_Count"]=trade_log.groupby("variant").size()
@@ -1361,6 +1365,123 @@ def _complexity_scorecard(summary,cost,exposure,variants):
 def _plain_table(df):
     return df.to_string(index=False) if isinstance(df,pd.DataFrame) and not df.empty else "No data available."
 
+R100_DEFAULT_VARIANTS=(
+    "Residual_100_N12_TTL90","Residual_100_N10_TTL90","Residual_100_N8_TTL90","Residual_100_N6_TTL90",
+    "Residual_100_N12_TTL90_Renew30_Composite","Residual_100_N10_TTL90_Renew30_Composite","Residual_100_N8_TTL90_Renew30_Composite","Residual_100_N6_TTL90_Renew30_Composite",
+)
+R100_REFERENCE_VARIANTS=("Residual_60_N12_TTL90_Renew30_Composite","Residual_65_N12_TTL90_Renew30_Composite","Residual_60_N12_TTL90","Residual_65_N12_TTL90","Baseline_N12_TTL90")
+
+def build_r100_composite_variants(variants=None, only_variant=None):
+    names=[only_variant] if only_variant else ([v.strip() for v in variants.split(',') if v.strip()] if variants else list(R100_DEFAULT_VARIANTS))
+    out=[]
+    for n in names:
+        import re
+        m=re.match(r"Residual_100_N(\d+)_TTL90(?:_Renew30_Composite)?$",n)
+        if not m: raise ValueError(f"unsupported r100_composite_experiment variant: {n}")
+        size=int(m.group(1)); usn=size//2; jpn=size-usn; comp="Renew30_Composite" in n
+        out.append({"name":n,"selection_name":f"Residual_100_N{size}","base_weight":0.0,"residual_weight":1.0,"total_holdings":size,"us_holdings":usn,"jp_holdings":jpn,"ttl_days":90,"renewal_protocol":"composite" if comp else None,"renewal_extension_days":30,"is_baseline":False})
+    return tuple(out)
+
+def _r100_cache_candidates(cache_dir,out,source_dir):
+    return [cache_dir, Path(out)/"cache", Path(source_dir)/"cache" if source_dir else None, "artifacts/ttl_renewal_quick/cache", "artifacts/residual_concentration/cache"]
+
+def _summary_extras(summary, annual, monthly):
+    s=summary.copy()
+    if not annual.empty:
+        s["Worst_Year"]=annual.min(); s["Best_Year"]=annual.max()
+    if not monthly.empty:
+        s["Worst_Month"]=monthly.min(); s["Monthly_Win_Rate"]=(monthly>0).mean()
+    return s
+
+def _concentration_risk(ticker, variants):
+    if ticker.empty: return pd.DataFrame(), pd.DataFrame()
+    rows=[]; split=[]
+    for v,g in ticker.groupby("variant"):
+        shares=g.approx_contribution_share.fillna(0).sort_values(ascending=False)
+        largest=float(shares.iloc[0]) if len(shares) else np.nan
+        rows.append({"variant":v,"unique_tickers_used":int(g.ticker.nunique()),"top_5_contribution_share_approx":float(shares.head(5).sum()),"top_10_contribution_share_approx":float(shares.head(10).sum()),"largest_single_ticker_activity_share":largest,"repeat_winner_count":int((shares>.05).sum()),"repeat_loser_count":0,"concentration_risk":"extreme" if largest>.35 else "high" if largest>.25 else "moderate" if largest>.15 else "controlled"})
+        split.append({"variant":v,"US_activity_share":float(g.loc[g.market=='US','approx_weight_used'].sum()/g.approx_weight_used.sum()) if g.approx_weight_used.sum() else np.nan,"JP_activity_share":float(g.loc[g.market=='JP','approx_weight_used'].sum()/g.approx_weight_used.sum()) if g.approx_weight_used.sum() else np.nan})
+    return pd.DataFrame(rows), pd.DataFrame(split)
+
+def _r100_overdrive(summary, cost, exposure, stress, conc):
+    rows=[]; s=summary; c=cost if not cost.empty else summary; ex=exposure.set_index('variant') if not exposure.empty and 'variant' in exposure else pd.DataFrame(); st=stress.set_index('variant') if not stress.empty and 'variant' in stress else pd.DataFrame(); co=conc.set_index('variant') if not conc.empty and 'variant' in conc else pd.DataFrame()
+    ref=[v for v in R100_REFERENCE_VARIANTS[:2] if v in c.index]
+    ref_cagr=float(c.loc[ref,'Tax_Slippage_Adjusted_CAGR'].max()) if ref and 'Tax_Slippage_Adjusted_CAGR' in c else np.nan
+    ref_dd=float(s.loc[ref,'Max_Drawdown'].min()) if ref and 'Max_Drawdown' in s else np.nan
+    for v in [x for x in R100_DEFAULT_VARIANTS if x.endswith('Composite') and x in s.index]:
+        net=float(c.loc[v,'Tax_Slippage_Adjusted_CAGR']) if v in c.index and 'Tax_Slippage_Adjusted_CAGR' in c else float(s.loc[v].get('CAGR',np.nan))
+        dd=float(s.loc[v].get('Max_Drawdown',np.nan)); avgex=float(ex.loc[v].get('average_active_exposure',np.nan)) if v in ex.index else np.nan
+        stressdd=float(st.loc[v].get('max_drawdown_2022',np.nan)) if v in st.index else np.nan; cr=str(co.loc[v].get('concentration_risk','unknown')) if v in co.index else 'unknown'
+        if avgex<.60 or dd<-0.60 or stressdd<-0.45 or cr=='extreme': rec='Reject'
+        elif (pd.notna(ref_cagr) and net>=ref_cagr and avgex>=.80 and dd>=ref_dd-.10 and cr in ('controlled','moderate')): rec='Standard Candidate'
+        elif avgex>=.70 and dd>-0.50 and cr!='extreme': rec='Overdrive Candidate'
+        else: rec='Research Only'
+        rows.append({'variant':v,'recommendation':rec,'net_cagr':net,'max_drawdown':dd,'average_active_exposure':avgex,'max_drawdown_2022':stressdd,'concentration_risk':cr,'criteria_note':'Classified using net CAGR, MaxDD, exposure, 2022 stress, concentration, and complexity.'})
+    return pd.DataFrame(rows)
+
+def write_r100_experiment_report(out, meta, tables):
+    out=Path(out); lines=["# R100 Composite Experiment Report",""]
+    sections=["Executive Summary","Why R100 Composite experiment was run","Experimental scope and anti-overheat design","Candidate variants","Fixed R100 TTL90 vs R100 Composite","R100_N6 Ferrari test","R100_N8/N10/N12 comparison","Comparison against Residual_60/65 Composite standard candidates","Cost-adjusted results","Active exposure and cash-drag analysis","2022 stress-year analysis","Drawdown episode analysis","Renewal decision analysis","Holding period analysis","Concentration and ticker contribution risk","Future data boundary review","Overdrive recommendation","Safety notes"]
+    for sec in sections:
+        lines += [f"## {sec}"]
+        if sec=="Candidate variants": lines.append(str(meta.get('selected_variants')))
+        elif sec=="Experimental scope and anti-overheat design": lines.append("Default scope is exactly 8 R100 variants, cache-first, no full sweep, no full score components, no per-health-check detail logs, partial save per variant, and resume support.")
+        elif sec=="Safety notes": lines.append("This is research/backtest output, not investment advice. R100 concentrated variants may be psychologically difficult to hold. High CAGR does not automatically imply standard adoption. R100_N6 should be treated as Overdrive / Satellite unless risk metrics are unexpectedly robust. Default L.U.M.U.S.-8 standard candidate remains Residual_60_N12_TTL90_Renew30_Composite unless clearly proven otherwise.")
+        else: lines.append(_plain_table(tables.get(sec,pd.DataFrame())))
+        lines.append("")
+    (out/"r100_experiment_report.md").write_text("\n".join(lines),encoding="utf-8"); Path("reports").mkdir(exist_ok=True); Path("reports/r100_experiment_report.md").write_text("\n".join(lines),encoding="utf-8")
+
+def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/r100_composite_experiment",source_dir="artifacts/ttl_composite_forensics",cache_dir=None,resume=False,variants=None,only_variant=None,quick=False,force_refresh_cache=False,tax_rate=0.20315,slippage_bps=10,no_detail_logs=True):
+    t0=time.time(); end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True); reset_insufficient_history_warnings(); LOG.info("audit start: r100_composite_experiment")
+    if us is None or jp is None: us,jp=get_live_universe()
+    us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]; modes=build_benchmark_modes(); default_mode=modes["broad_default"]; bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals}); requested=list(dict.fromkeys([*us,*jp])); vars_cfg=build_r100_composite_variants(variants,only_variant); selected=[v['name'] for v in vars_cfg]; LOG.info("selected variants: %s",selected)
+    failures=pd.DataFrame(columns=["ticker","reason"]); cache_meta={"cache_used":prices is not None,"cache_source":"provided_prices" if prices is not None else ""}
+    if prices is None:
+        LOG.info("cache loading start")
+        prices,cache_meta=_load_ttl_cache(_r100_cache_candidates(cache_dir,out,source_dir),start,end,requested,bench_tickers)
+        if prices is None and not force_refresh_cache: raise SystemExit("r100_composite_experiment cache miss: default download is disabled; pass --force-refresh-cache to download")
+        if prices is None: prices,failures,requested,cache_meta=build_price_cache(requested,bench_tickers,start,end,out/"cache",downloader=None)
+        LOG.info("cache loading end: %s",cache_meta.get("cache_source"))
+    dq,_,_,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end); us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
+    completed=set(); cp=out/"completed_variants.csv"; partial=out/"variant_summary_partial.csv"; costpartial=out/"cost_adjusted_summary_partial.csv"
+    if resume and cp.exists(): completed=set(pd.read_csv(cp).variant.astype(str));
+    if resume and completed and (not partial.exists() or not costpartial.exists()): LOG.warning("resume requested but partial summaries are missing; completed variants will be recomputed"); completed=set()
+    returns={}; selected_rows=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; partial_rows=[]; cost_rows=[]
+    for v in vars_cfg:
+        if resume and v['name'] in completed: LOG.info("variant skip completed: %s",v['name']); continue
+        LOG.info("variant start: %s",v['name'])
+        r,sel,sc,tu,tr,hp,rd,ev=run_ttl_renewal_variant(prices,us_usable,jp_usable,start,end,v,default_mode,detail_logs=not no_detail_logs)
+        returns[v['name']]=r; selected_rows.append(sel); turns.append(tu); trades.append(tr); holds.append(hp); decisions.append(rd); events.append(ev)
+        summ=metrics(r); summ.update({'Variant':v['name'],'Turnover':float(tu.turnover.mean()) if not tu.empty else np.nan}); partial_rows.append(summ)
+        nr,slip,tax=_cost_adjusted_returns(r,tu,tax_rate,slippage_bps); nm=metrics(nr); crow={'Variant':v['name'],'Slippage_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,0,slippage_bps)[0]),'Tax_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,tax_rate,0)[0]),'Tax_Slippage_Adjusted_CAGR':nm['CAGR'],'Estimated_Tax_Drag':summ['CAGR']-nm['CAGR'],'Estimated_Slippage_Drag':slip,'Net_Sharpe':nm['Sharpe'],'Net_Calmar':nm['Calmar']}; cost_rows.append(crow)
+        pd.DataFrame(partial_rows).to_csv(partial,index=False); pd.DataFrame(cost_rows).to_csv(costpartial,index=False); pd.DataFrame([{'variant':v['name'],'completed_at':pd.Timestamp.now('UTC').isoformat()}]).to_csv(cp,mode='a',header=not cp.exists(),index=False); LOG.info("partial output writing: %s",v['name']); LOG.info("variant end: %s",v['name'])
+    
+    if resume and not returns:
+        LOG.info("resume found no variants to run; existing partial outputs retained")
+        return pd.DataFrame()
+    turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame()
+    summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name='Variant'
+    if not turnover.empty: summary['Turnover']=turnover.groupby('variant').turnover.mean()
+    annual=pd.DataFrame({k:(1+v).resample('YE').prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample('ME').prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()}); cost=pd.DataFrame(cost_rows).set_index('Variant') if cost_rows else pd.DataFrame(); summary=_summary_extras(summary,annual,monthly); summary=summary.join(cost,how='left') if not cost.empty else summary
+    LOG.info("exposure analysis start"); exposure_daily,exposure_summary=_active_exposure(trade_log,selected,start,end); LOG.info("exposure analysis end")
+    renewal_summary,renewal_year,_=_renewal_summaries(renewal_decisions,selected); holding_summary=_holding_summary(holding_periods,selected); LOG.info("stress analysis start"); stress=_stress_2022(monthly,draw,exposure_daily,renewal_decisions,selected); LOG.info("stress analysis end"); episodes=_drawdown_episodes(draw,exposure_daily,renewal_decisions,selected); ticker=_ticker_contrib(trade_log,selected); conc,split=_concentration_risk(ticker,selected); future=_future_boundary_review(renewal_decisions,{'monthly_returns.csv':monthly,'annual_returns.csv':annual,'drawdown_series.csv':draw,'renewal_decisions.csv':renewal_decisions}); complexity=pd.DataFrame([{'variant':v,'rule_complexity':'high' if 'Composite' in v else 'low','full_sweep':False,'score_components_full_output':False} for v in selected]); over=_r100_overdrive(summary,cost,exposure_summary,stress,conc)
+    refs=[]
+    if source_dir and Path(source_dir).exists():
+        for name in ('forensics_summary.csv','candidate_comparison.csv','variant_summary.csv','cost_adjusted_summary.csv'):
+            df=_read_artifact_csv(source_dir,name,index_col=0 if name in ('variant_summary.csv','cost_adjusted_summary.csv') else None); f=_filter_variants(df,list(R100_REFERENCE_VARIANTS));
+            if not f.empty: refs.append(f.reset_index().rename(columns={'index':'variant'}))
+    candidate=pd.concat([summary.reset_index().rename(columns={'Variant':'variant'}),*refs],ignore_index=True,sort=False) if refs else summary.reset_index().rename(columns={'Variant':'variant'})
+    cash=exposure_summary[['variant','average_active_exposure','average_cash_weight','exposure_judgment']].copy() if not exposure_summary.empty else pd.DataFrame(); event_summary=ttl_event_log.groupby(['variant','event']).size().reset_index(name='count') if not ttl_event_log.empty else pd.DataFrame()
+    meta={'audit_name':'r100_composite_experiment','selected_variants':selected,'reference_variants':list(R100_REFERENCE_VARIANTS),'default_download_allowed':False,'default_full_variant_recalculation_allowed':False,'score_components_full_output':False,'cache_first_candidates':[str(x) for x in _r100_cache_candidates(cache_dir,out,source_dir) if x],'cache_used':cache_meta.get('cache_used',False),'cache_source':cache_meta.get('cache_source',''),'resume':resume,'tax_rate':tax_rate,'slippage_bps':slippage_bps,'output_files':R100_OUTPUT_FILES,'wall_time_seconds':round(time.time()-t0,2)}
+    LOG.info("report writing start")
+    for name,df,idx in (("r100_variant_summary.csv",summary,True),("r100_cost_adjusted_summary.csv",cost,True),("r100_candidate_comparison.csv",candidate,False),("r100_complexity_scorecard.csv",complexity,False),("r100_overdrive_recommendation.csv",over,False),("r100_active_exposure_daily.csv",exposure_daily,False),("r100_active_exposure_summary.csv",exposure_summary,False),("r100_cash_drag_proxy.csv",cash,False),("r100_drawdown_episodes.csv",episodes,False),("r100_stress_year_2022.csv",stress,False),("r100_renewal_decisions.csv",renewal_decisions,False),("r100_renewal_condition_summary.csv",renewal_summary,False),("r100_renewal_decision_by_year.csv",renewal_year,False),("r100_holding_period_summary.csv",holding_summary,False),("r100_ticker_contribution_summary.csv",ticker,False),("r100_concentration_risk_summary.csv",conc,False),("r100_us_jp_split_summary.csv",split,False),("r100_event_log_summary.csv",event_summary,False),("future_data_boundary_review.csv",future,False)): _write_df(df,out/name,index=idx)
+    summary.to_json(out/"r100_variant_summary.json",orient='index',indent=2); (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding='utf-8')
+    write_r100_experiment_report(out,meta,{"Fixed R100 TTL90 vs R100 Composite":candidate,"Cost-adjusted results":cost.reset_index() if not cost.empty else cost,"Active exposure and cash-drag analysis":exposure_summary,"2022 stress-year analysis":stress,"Drawdown episode analysis":episodes,"Renewal decision analysis":renewal_summary,"Holding period analysis":holding_summary,"Concentration and ticker contribution risk":conc,"Future data boundary review":future,"Overdrive recommendation":over})
+    LOG.info("report writing end"); LOG.info("audit complete with wall time %.1fs",time.time()-t0); return summary
+
+R100_OUTPUT_FILES=("r100_variant_summary.csv","r100_variant_summary.json","r100_cost_adjusted_summary.csv","r100_candidate_comparison.csv","r100_complexity_scorecard.csv","r100_overdrive_recommendation.csv","r100_experiment_report.md","audit_metadata.json","r100_active_exposure_daily.csv","r100_active_exposure_summary.csv","r100_cash_drag_proxy.csv","r100_drawdown_episodes.csv","r100_stress_year_2022.csv","r100_renewal_decisions.csv","r100_renewal_condition_summary.csv","r100_renewal_decision_by_year.csv","r100_holding_period_summary.csv","r100_ticker_contribution_summary.csv","r100_concentration_risk_summary.csv","r100_us_jp_split_summary.csv","completed_variants.csv","variant_summary_partial.csv","cost_adjusted_summary_partial.csv","r100_event_log_summary.csv","future_data_boundary_review.csv")
+
+
 def write_ttl_composite_forensics_report(output_dir, meta, tables):
     out=Path(output_dir); comp=_plain_table(tables.get("candidate_comparison",pd.DataFrame())) if not tables.get("candidate_comparison",pd.DataFrame()).empty else "No comparison data available."
     exposure=_plain_table(tables.get("active_exposure_summary",pd.DataFrame())) if not tables.get("active_exposure_summary",pd.DataFrame()).empty else "No exposure data available."
@@ -1583,12 +1704,14 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--source-dir",default="artifacts/ttl_renewal_quick"); ap.add_argument("--rerun-selected",action="store_true"); ap.add_argument("--variants"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal","ttl_composite_forensics"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--source-dir",default="artifacts/ttl_renewal_quick"); ap.add_argument("--rerun-selected",action="store_true"); ap.add_argument("--variants"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--only-variant"); ap.add_argument("--no-detail-logs",action="store_true",default=True); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal","ttl_composite_forensics","r100_composite_experiment"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         if args.audit=="ttl_composite_forensics":
             summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
         us,jp=get_live_universe()
+        if args.audit=="r100_composite_experiment":
+            summary=run_r100_composite_experiment_audit(None,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
         if args.audit=="ttl_renewal":
             summary=run_ttl_renewal_audit(None,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
         if args.audit=="residual_concentration":
@@ -1601,6 +1724,8 @@ def main():
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
     if args.audit=="ttl_composite_forensics":
         summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
+    if args.audit=="r100_composite_experiment":
+        summary=run_r100_composite_experiment_audit(p,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
     if args.audit=="ttl_renewal":
         summary=run_ttl_renewal_audit(p,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
     if args.audit=="residual_concentration":

@@ -991,6 +991,194 @@ def run_residual_concentration_audit(prices=None,us=None,jp=None,start="2015-01-
     (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8"); write_residual_concentration_report(summary,dq,meta,conc,bps,brr,sweet,div,out); LOG.info("report writing end"); return summary
 
 
+TTL_QUICK_SELECTIONS=((0.55,12,6,6),(0.60,12,6,6),(0.65,12,6,6))
+TTL_FULL_SELECTIONS=((0.50,12,6,6),(0.55,12,6,6),(0.60,12,6,6),(0.65,12,6,6),(0.70,12,6,6),(0.60,10,5,5),(0.65,10,5,5),(1.00,12,6,6))
+TTL_RENEWAL_PROTOCOLS=("Rank","Residual","Composite")
+
+def build_ttl_renewal_variants(quick=False, include_baseline=True):
+    sels=TTL_QUICK_SELECTIONS if quick else TTL_FULL_SELECTIONS; ttls=(60,90,120,180) if quick else (30,60,90,120,180); out=[]
+    if include_baseline: out.append({"name":"Baseline_N12_TTL90","selection_name":"Baseline_N12","base_weight":1.0,"residual_weight":0.0,"total_holdings":12,"us_holdings":6,"jp_holdings":6,"ttl_days":90,"renewal_protocol":None,"is_baseline":True})
+    for w,n,u,j in sels:
+        s=f"Residual_{int(round(w*100)):02d}_N{n}"
+        for ttl in ttls: out.append({"name":f"{s}_TTL{ttl}","selection_name":s,"base_weight":round(1-w,2),"residual_weight":round(w,2),"total_holdings":n,"us_holdings":u,"jp_holdings":j,"ttl_days":ttl,"renewal_protocol":None,"is_baseline":False})
+        for proto in TTL_RENEWAL_PROTOCOLS: out.append({"name":f"{s}_TTL90_Renew30_{proto}","selection_name":s,"base_weight":round(1-w,2),"residual_weight":round(w,2),"total_holdings":n,"us_holdings":u,"jp_holdings":j,"ttl_days":90,"renewal_protocol":proto.lower(),"renewal_extension_days":30,"is_baseline":False})
+    return tuple(out)
+
+def _next_trade_date(index, dt):
+    idx=index[index>=pd.Timestamp(dt)]
+    return idx[0] if len(idx) else None
+
+def _select_ttl_candidates(prices,us,jp,as_of_date,variant,benchmark_mode=None):
+    frames=[]; allscores=[]
+    for region,tickers,topn in (("US",us,variant["us_holdings"]),("JP",jp,variant["jp_holdings"])):
+        base=score_universe(prices,[x for x in tickers if x in prices],as_of_date)
+        residual=compute_residual_momentum_score(prices,base.index,as_of_date,region,benchmark_mode=benchmark_mode,method="simple")
+        d=combine_residual_score(base,residual,variant).copy(); d["Region"]=region; d["market_rank"]=np.arange(1,len(d)+1); allscores.append(d.head(max(topn*2,12)).copy())
+        frames.append(d.head(topn).copy())
+    p=pd.concat(frames) if any(not x.empty for x in frames) else pd.DataFrame()
+    if not p.empty:
+        inv=1/p.Volatility.replace(0,np.nan); p["Weight"]=inv/inv.sum()
+    scores=pd.concat(allscores) if any(not x.empty for x in allscores) else pd.DataFrame()
+    return p,scores
+
+def _health_row(prices,us,jp,date,ticker,region,variant,benchmark_mode=None):
+    topn=variant["us_holdings"] if region=="US" else variant["jp_holdings"]; universe=us if region=="US" else jp
+    _,scores=_select_ttl_candidates(prices,us if region=="US" else [],jp if region=="JP" else [],date,{**variant,"us_holdings":topn if region=="US" else 0,"jp_holdings":topn if region=="JP" else 0},benchmark_mode)
+    if ticker in scores.index: row=scores.loc[ticker]
+    else:
+        base=score_universe(prices,[x for x in universe if x in prices],date); residual=compute_residual_momentum_score(prices,base.index,date,region,benchmark_mode=benchmark_mode); d=combine_residual_score(base,residual,variant); d["market_rank"]=np.arange(1,len(d)+1); row=d.loc[ticker] if ticker in d.index else pd.Series(dtype=float)
+    s=asof_prices(prices,date).ffill()[ticker].dropna() if ticker in prices else pd.Series(dtype=float)
+    above50=bool(len(s)>=50 and s.iloc[-1]>=s.tail(50).mean())
+    rank=float(row.get("market_rank",np.inf)); residual_score=float(row.get("residual_raw",row.get("residual_score",0)))
+    rank_pass=rank<=topn*2; residual_pass=residual_score>0; composite_count=int(rank_pass)+int(residual_pass)+int(above50)
+    return {"market_rank":rank,"rank_pass":rank_pass,"residual_score":residual_score,"residual_pass":residual_pass,"price_above_50dma":above50,"composite_count":composite_count,"composite_pass":composite_count>=2}
+
+def _renewal_pass(protocol,h):
+    return h["rank_pass"] if protocol=="rank" else h["residual_pass"] if protocol=="residual" else h["composite_pass"]
+
+def run_ttl_renewal_variant(prices,us,jp,start,end,variant,benchmark_mode=None):
+    prices=prices.sort_index(); idx=prices.loc[start:end].index; rets=prices.pct_change(); out=pd.Series(0.,index=idx); selected=[]; scores_lite=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; prev={}; t=_next_trade_date(prices.index,pd.Timestamp(start)); cycle=0
+    while t is not None and t<=pd.Timestamp(end):
+        screen=prices.index[prices.index<t][-1] if len(prices.index[prices.index<t]) else t
+        p,sc=_select_ttl_candidates(prices,us,jp,screen,variant,benchmark_mode); weights=p.Weight.to_dict() if not p.empty else {}; cycle+=1
+        base_end=_next_trade_date(prices.index,t+pd.Timedelta(days=variant["ttl_days"])); base_end=base_end if base_end is not None else prices.index[-1]
+        final_end=base_end; active=dict(weights); protocol=variant.get("renewal_protocol")
+        if protocol:
+            LOG.info("renewal health check start: %s %s",variant["name"],screen)
+            final_end=_next_trade_date(prices.index,t+pd.Timedelta(days=120)) or prices.index[-1]
+            for ticker,row in p.iterrows():
+                h=_health_row(prices,us,jp,base_end,ticker,row.get("Region"),variant,benchmark_mode); ok=_renewal_pass(protocol,h); decisions.append({"variant":variant["name"],"ticker":ticker,"screen_date":screen,"trade_date":t,"health_check_date":base_end,"protocol":protocol,"renewed":ok,**h})
+                if not ok: active.pop(ticker,None)
+            LOG.info("renewal health check end: %s",variant["name"])
+            # weekly degradation only for composite extension; non-pass becomes cash until normal 120-day cycle end
+            if protocol=="composite" and active:
+                for wd in pd.date_range(base_end,final_end,freq="W-FRI"):
+                    check=_next_trade_date(prices.index,wd)
+                    if check is None or check>final_end: continue
+                    for ticker in list(active):
+                        region=p.loc[ticker].get("Region"); h=_health_row(prices,us,jp,check,ticker,region,variant,benchmark_mode)
+                        if h["composite_count"]<2: active.pop(ticker,None); events.append({"variant":variant["name"],"date":check,"ticker":ticker,"event":"extension_degradation_end","holding_days":int((check-t).days),**h})
+        hold=out.index[(out.index>=t)&(out.index<=final_end)]
+        if len(hold): out.loc[hold]=rets.reindex(hold)[list(active)].mul(pd.Series(active)).sum(axis=1) if active else 0.
+        turns.append({"variant":variant["name"],"screen_date":screen,"trade_date":t,"turnover":sum(abs(weights.get(k,0)-prev.get(k,0)) for k in set(weights)|set(prev))/2,"names_changed":len(set(weights)^set(prev)),"ttl_days":variant["ttl_days"],"renewal_protocol":protocol or "fixed"}); prev=weights
+        for ticker,row in p.iterrows():
+            exit_date=final_end if ticker in active else base_end; hd=int((exit_date-t).days); selected.append({"variant":variant["name"],"screen_date":screen,"trade_date":t,"ticker":ticker,"exit_date":exit_date,"holding_days":hd,**row.to_dict()}); holds.append({"variant":variant["name"],"ticker":ticker,"entry_date":t,"exit_date":exit_date,"holding_days":hd,"renewal_protocol":protocol or "fixed"}); trades += [{"variant":variant["name"],"date":t,"ticker":ticker,"action":"BUY","weight":weights.get(ticker,0)},{"variant":variant["name"],"date":exit_date,"ticker":ticker,"action":"SELL","weight":weights.get(ticker,0)}]; events.append({"variant":variant["name"],"date":t,"ticker":ticker,"event":"entry","holding_days":0}); events.append({"variant":variant["name"],"date":exit_date,"ticker":ticker,"event":"exit","holding_days":hd})
+        if not sc.empty:
+            tmp=sc.reset_index().rename(columns={"index":"ticker"}); tmp["variant"]=variant["name"]; tmp["date"]=screen; scores_lite.append(tmp.head(max(variant["total_holdings"]*2,12)))
+        t=_next_trade_date(prices.index,final_end+pd.Timedelta(days=1))
+    return out,pd.DataFrame(selected),pd.concat(scores_lite,ignore_index=True) if scores_lite else pd.DataFrame(),pd.DataFrame(turns),pd.DataFrame(trades),pd.DataFrame(holds),pd.DataFrame(decisions),pd.DataFrame(events)
+
+def _cost_adjusted_returns(r,turnover,tax_rate=0.20315,slippage_bps=10):
+    rr=pd.Series(r).copy(); slip=tax=0.0
+    for _,tr in turnover.iterrows():
+        d=pd.Timestamp(tr.get("trade_date")); tv=float(tr.get("turnover",0)); cost=tv*slippage_bps/10000; slip+=cost
+        if d in rr.index: rr.loc[d]-=cost
+        tc=max(0,float(rr.loc[:d].mean() if d in rr.index and len(rr.loc[:d]) else 0))*tv*tax_rate; tax+=tc
+        if d in rr.index: rr.loc[d]-=tc
+    return rr,slip,tax
+
+def _load_ttl_cache(candidates,start,end,requested,bench_tickers):
+    for source in candidates:
+        if not source: continue
+        p=Path(source)
+        if not p.exists(): continue
+        ok,reason=validate_price_cache(p,start,end,requested,bench_tickers)
+        if ok:
+            prices,bench=load_price_cache(p); return pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(), {"cache_used":True,"cache_source":str(p),"cache_status":"hit","prices_cache_found":(p/"prices.pkl").exists(),"benchmarks_cache_found":(p/"benchmarks.pkl").exists(),"cache_loaded_at":pd.Timestamp.now("UTC").isoformat()}
+        LOG.warning("ttl_renewal cache fallback from %s: %s",p,reason)
+    return None,{"cache_used":False,"cache_source":"","cache_status":"miss","prices_cache_found":False,"benchmarks_cache_found":False,"cache_loaded_at":""}
+
+def run_ttl_renewal_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/ttl_renewal",downloader=None,quick=False,cache_dir=None,force_refresh_cache=False,resume=False,tax_rate=0.20315,slippage_bps=10,full_score_output=False):
+    import json, time
+    t0=time.time(); end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True); reset_insufficient_history_warnings(); LOG.info("audit start: ttl_renewal; mode=%s", "quick" if quick else "full")
+    if us is None or jp is None: us,jp=get_live_universe()
+    us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]; modes=build_benchmark_modes(); default_mode=modes["broad_default"]; bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals}); requested=list(dict.fromkeys([*us,*jp])); variants=build_ttl_renewal_variants(quick=quick); LOG.info("variant count: %s",len(variants)-1)
+    failures=pd.DataFrame(columns=["ticker","reason"]); cache_meta={"cache_used":prices is not None,"cache_source":"provided_prices" if prices is not None else ""}
+    if prices is None:
+        LOG.info("cache loading start")
+        if not force_refresh_cache: prices,cache_meta=_load_ttl_cache([cache_dir,out/"cache","artifacts/residual_concentration/cache","artifacts/residual_full_sweep/cache"],start,end,requested,bench_tickers)
+        if prices is None: prices,failures,requested,cache_meta=build_price_cache(requested,bench_tickers,start,end,out/"cache",downloader=downloader)
+        LOG.info("cache loading end: %s",cache_meta.get("cache_source"))
+    dq,insufficient,excluded,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end)
+    us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]; LOG.info("data quality filtering end; usable universe size=%s",len(usable))
+    for k in ("cache_used","cache_source","prices_cache_found","benchmarks_cache_found","cache_loaded_at"):
+        dq=pd.concat([dq,pd.DataFrame([{"metric":k,"value":cache_meta.get(k,"")}])],ignore_index=True)
+    dq=pd.concat([dq,pd.DataFrame([{"metric":"universe_size","value":len(requested)},{"metric":"usable_universe_size","value":len(usable)}])],ignore_index=True)
+    completed=set(); cp=out/"completed_variants.csv"
+    if resume and cp.exists(): completed=set(pd.read_csv(cp).variant.astype(str))
+    returns={}; selected=[]; scores=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]
+    for v in variants:
+        if resume and v["name"] in completed: LOG.info("variant skip completed: %s",v["name"]); continue
+        LOG.info("variant start: %s ttl=%s renewal=%s",v["name"],v["ttl_days"],v.get("renewal_protocol") or "fixed")
+        r,sel,sc,tu,tr,hp,rd,ev=run_ttl_renewal_variant(prices,us_usable,jp_usable,start,end,v,default_mode); returns[v["name"]]=r; selected.append(sel); scores.append(sc); turns.append(tu); trades.append(tr); holds.append(hp); decisions.append(rd); events.append(ev)
+        pd.DataFrame([{"variant":v["name"]}]).to_csv(cp,mode="a",header=not cp.exists(),index=False); LOG.info("variant end: %s",v["name"])
+    selected=pd.concat(selected,ignore_index=True) if selected else pd.DataFrame(); turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame(); score_components=pd.concat(scores,ignore_index=True) if scores else pd.DataFrame()
+    summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name="Variant"
+    if not turnover.empty: summary["Turnover"]=turnover.groupby("variant").turnover.mean(); summary["Annualized_Turnover"]=summary["Turnover"]*252/summary.index.map(lambda x: next((v["ttl_days"] for v in variants if v["name"]==x),90)); summary["Number_of_Rebalances"]=turnover.groupby("variant").size(); summary["Average_names_changed_per_rebalance"]=turnover.groupby("variant").names_changed.mean()
+    if not holding_periods.empty: summary["Average_Holding_Days"]=holding_periods.groupby("variant").holding_days.mean(); summary["Median_Holding_Days"]=holding_periods.groupby("variant").holding_days.median(); summary["Max_Holding_Days"]=holding_periods.groupby("variant").holding_days.max(); summary["Trade_Count"]=trade_log.groupby("variant").size()
+    annual=pd.DataFrame({k:(1+v).resample("YE").prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample("ME").prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()})
+    cost_rows=[]
+    for k,r in returns.items():
+        tu=turnover[turnover.variant==k] if not turnover.empty else pd.DataFrame(); nr,slip,tax=_cost_adjusted_returns(r,tu,tax_rate,slippage_bps); nm=metrics(nr); gross=summary.loc[k]
+        cost_rows.append({"Variant":k,"Slippage_Adjusted_CAGR":cagr(_cost_adjusted_returns(r,tu,0,slippage_bps)[0]),"Tax_Adjusted_CAGR":cagr(_cost_adjusted_returns(r,tu,tax_rate,0)[0]),"Tax_Slippage_Adjusted_CAGR":nm["CAGR"],"Estimated_Tax_Drag":gross.CAGR-nm["CAGR"] if pd.notna(gross.CAGR) else np.nan,"Estimated_Slippage_Drag":slip,"Net_Sharpe":nm["Sharpe"],"Net_Calmar":nm["Calmar"]})
+    cost_summary=pd.DataFrame(cost_rows).set_index("Variant") if cost_rows else pd.DataFrame()
+    for c in cost_summary.columns: summary[c]=cost_summary[c]
+    insuff_summary=get_insufficient_history_summary(); meta={"audit_name":"ttl_renewal","quick_mode":quick,"target_variant_count":21 if quick else 64,"variant_count_including_baseline":len(variants),"cache_used":cache_meta.get("cache_used",False),"cache_source":cache_meta.get("cache_source",""),"prices_cache_found":cache_meta.get("prices_cache_found",False),"benchmarks_cache_found":cache_meta.get("benchmarks_cache_found",False),"cache_loaded_at":cache_meta.get("cache_loaded_at",""),"universe_size":len(requested),"usable_universe_size":len(usable),"tax_rate":tax_rate,"slippage_bps":slippage_bps,"exit_protocol_enabled":False,"regime_filter_enabled":False,"vcp_enabled":False,"sector_residual_enabled":False,"downside_penalty_enabled":False,"correlation_penalty_enabled":False,"initial_period_exit_enabled":False,"renewal_protocol_enabled":True,"renewal_max_extension_days":30,"max_holding_days":"120 for renewal variants","cost_model_note":"Approximate only; not tax advice.","wall_time_seconds":round(time.time()-t0,2)}
+    LOG.info("output writing start")
+    for name,df,idxout in (("variant_summary.csv",summary,True),("annual_returns.csv",annual,True),("monthly_returns.csv",monthly,True),("drawdown_series.csv",draw,True),("turnover.csv",turnover,False),("trade_log.csv",trade_log,False),("holding_periods.csv",holding_periods,False),("renewal_decisions.csv",renewal_decisions,False),("ttl_event_log.csv",ttl_event_log,False),("cost_adjusted_summary.csv",cost_summary,True),("data_quality.csv",dq,False),("insufficient_history_summary.csv",insuff_summary,False)): df.to_csv(out/name,index=idxout)
+    summary.to_json(out/"variant_summary.json",orient="index",indent=2); selected.to_csv(out/"selected_tickers.csv",index=False); score_components.to_csv(out/("score_components_full.csv" if full_score_output else "score_components_selected_only.csv"),index=False); (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8"); write_ttl_renewal_report(summary,dq,meta,out); LOG.info("audit complete; wall time %.1fs",time.time()-t0); return summary
+
+def write_ttl_renewal_report(summary,data_quality,metadata,output_dir="artifacts/ttl_renewal"):
+    base="Residual_60_N12_TTL90" if "Residual_60_N12_TTL90" in summary.index else (summary.index[0] if len(summary) else "")
+    best=summary.Calmar.idxmax() if len(summary) and "Calmar" in summary else ""
+    view=summary[[c for c in ["CAGR","Max_Drawdown","Calmar","Turnover","Tax_Slippage_Adjusted_CAGR"] if c in summary]].head(30)
+    report=f"""# TTL Renewal Audit Report
+
+## 1. Executive Summary
+Best Calmar variant in this run: **{best}**. Comparison baseline for current residual standard: **{base}**. Recommendation buckets to review: Keep TTL90, Move to Fixed TTL120, Use TTL90 + Renewal30, Research only, Reject.
+
+## 2. Audit Scope
+Residual Momentum selection with US/JP balanced N12/N10, fixed TTL variants, and TTL90 Renewal30 variants only. No Exit Protocol, Regime Filter, VCP, Sector Residual, Downside penalty, or Correlation penalty.
+
+## 3. Data Quality
+{_markdown_table(data_quality.set_index('metric') if not data_quality.empty else data_quality)}
+
+## 4. Cache Usage
+cache_used={metadata.get('cache_used')}; cache_source={metadata.get('cache_source')}; cache_loaded_at={metadata.get('cache_loaded_at')}.
+
+## 5. Fixed TTL Results
+Review TTL30/60/90/120/180 rows in `variant_summary.csv` for CAGR, MaxDD, Calmar, holding days, and turnover.
+
+## 6. TTL Renewal Protocol Results
+Rank uses same-market rank <= market_slots*2. Residual uses residual_raw > 0. Composite requires at least two of rank buffer, residual_raw > 0, and price above 50DMA. Weekly degradation applies only during the extension window and is an extension cutoff, not a general exit.
+
+## 7. Cost-adjusted Results
+Tax/slippage are approximate relative-comparison estimates, not tax advice. See `cost_adjusted_summary.csv`.
+
+## 8. Turnover / Tax / Slippage Review
+Compare Annualized_Turnover, Trade_Count, Estimated_Tax_Drag, and Estimated_Slippage_Drag.
+
+## 9. Holding Period Review
+Renewal variants enforce no initial exit before 90 days and max holding days of 120 days.
+
+## 10. 2022 Stress Year Review
+Use `annual_returns.csv`, `monthly_returns.csv`, and `drawdown_series.csv` for 2022 if present.
+
+## 11. Comparison vs Current TTL90
+Primary row: Residual_60_N12_TTL90 versus Residual_60_N12_TTL120 and Residual_60_N12_TTL90_Renew30_*.
+
+## 12. Recommendation
+Keep TTL90 if it remains Calmar/MaxDD competitive. Move to Fixed TTL120 only if it clearly improves net CAGR/Calmar without larger drawdowns. Use TTL90 + Renewal30 only if net metrics and turnover improve enough to justify complexity. Otherwise Research only or Reject.
+
+## 13. Safety Notes
+Research only; no automatic trading. Free data may be incomplete and biased. Cost model is approximate and not tax advice.
+
+## Summary Preview
+{_markdown_table(view)}
+"""
+    (Path(output_dir)/"ttl_renewal_report.md").write_text(report,encoding="utf-8"); Path("reports/ttl_renewal_report.md").write_text(report,encoding="utf-8")
+
+
 def write_residual_concentration_report(summary,data_quality,metadata,conc,bps,brr,sweet,div,output_dir="artifacts/residual_concentration"):
     Path("reports").mkdir(exist_ok=True)
     if "Baseline_N12" in summary.index and summary.CAGR.notna().any():
@@ -1067,10 +1255,12 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run residual_concentration quick mode (21 variants)"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         us,jp=get_live_universe()
+        if args.audit=="ttl_renewal":
+            summary=run_ttl_renewal_audit(None,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
         if args.audit=="residual_concentration":
             summary=run_residual_concentration_audit(None,us,jp,args.start,args.end,args.output_dir,quick=args.quick); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         if args.audit=="residual_full_sweep":
@@ -1079,6 +1269,8 @@ def main():
             summary=run_residual_live_validation(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="ttl_renewal":
+        summary=run_ttl_renewal_audit(p,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
     if args.audit=="residual_concentration":
         summary=run_residual_concentration_audit(p,us,jp,args.start,args.end,args.output_dir,quick=args.quick); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
     if args.audit=="residual_full_sweep":

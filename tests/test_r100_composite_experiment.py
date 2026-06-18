@@ -94,7 +94,7 @@ def test_demo_r100_outputs_and_resume(tmp_path):
     assert meta["default_download_allowed"] is False
     assert meta["score_components_full_output"] is False
     completed_before = pd.read_csv(out / "completed_variants.csv")
-    skipped = aeb.run_r100_composite_experiment_audit(
+    resumed = aeb.run_r100_composite_experiment_audit(
         prices=prices,
         us=us,
         jp=jp,
@@ -104,6 +104,52 @@ def test_demo_r100_outputs_and_resume(tmp_path):
         variants="Residual_100_N6_TTL90,Residual_100_N6_TTL90_Renew30_Composite",
         resume=True,
     )
-    assert skipped.empty
+    assert list(resumed.index) == [
+        "Residual_100_N6_TTL90",
+        "Residual_100_N6_TTL90_Renew30_Composite",
+    ]
     completed_after = pd.read_csv(out / "completed_variants.csv")
     assert len(completed_after) == len(completed_before)
+
+
+def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
+    prices = aeb.demo_prices()
+    us = [f"US{i}" for i in range(8)]
+    jp = [f"JP{i}.T" for i in range(8)]
+    out = tmp_path / "r100_resume_full"
+    n6_variants = "Residual_100_N6_TTL90,Residual_100_N6_TTL90_Renew30_Composite"
+
+    aeb.run_r100_composite_experiment_audit(
+        prices=prices,
+        us=us,
+        jp=jp,
+        start="2018-01-01",
+        end="2022-12-31",
+        output_dir=out,
+        variants=n6_variants,
+    )
+
+    summary = aeb.run_r100_composite_experiment_audit(
+        prices=prices,
+        us=us,
+        jp=jp,
+        start="2018-01-01",
+        end="2022-12-31",
+        output_dir=out,
+        resume=True,
+    )
+
+    final_summary = pd.read_csv(out / "r100_variant_summary.csv", index_col=0)
+    assert list(final_summary.index) == list(aeb.R100_DEFAULT_VARIANTS)
+    assert list(summary.index) == list(aeb.R100_DEFAULT_VARIANTS)
+
+    overdrive = pd.read_csv(out / "r100_overdrive_recommendation.csv")
+    assert "Residual_100_N6_TTL90_Renew30_Composite" in set(overdrive["variant"])
+
+    stress = pd.read_csv(out / "r100_stress_year_2022.csv")
+    n6_stress = stress[stress["variant"].isin([
+        "Residual_100_N6_TTL90",
+        "Residual_100_N6_TTL90_Renew30_Composite",
+    ])]
+    assert len(n6_stress) == 2
+    assert not n6_stress.drop(columns=["variant"]).isna().all(axis=1).any()

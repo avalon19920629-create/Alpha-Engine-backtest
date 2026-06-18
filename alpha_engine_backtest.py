@@ -1,6 +1,6 @@
 """Point-in-time Alpha Engine backtest audit (research only; no trading connection)."""
 from __future__ import annotations
-import argparse, importlib.util, logging
+import argparse, importlib.util, logging, json, time
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -1128,6 +1128,296 @@ def run_ttl_renewal_audit(prices=None,us=None,jp=None,start="2015-01-01",end=Non
     for name,df,idxout in (("variant_summary.csv",summary,True),("annual_returns.csv",annual,True),("monthly_returns.csv",monthly,True),("drawdown_series.csv",draw,True),("turnover.csv",turnover,False),("trade_log.csv",trade_log,False),("holding_periods.csv",holding_periods,False),("renewal_decisions.csv",renewal_decisions,False),("ttl_event_log.csv",ttl_event_log,False),("cost_adjusted_summary.csv",cost_summary,True),("data_quality.csv",dq,False),("insufficient_history_summary.csv",insuff_summary,False)): df.to_csv(out/name,index=idxout)
     summary.to_json(out/"variant_summary.json",orient="index",indent=2); selected.to_csv(out/"selected_tickers.csv",index=False); score_components.to_csv(out/("score_components_full.csv" if full_score_output else "score_components_selected_only.csv"),index=False); (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8"); write_ttl_renewal_report(summary,dq,meta,out); LOG.info("audit complete; wall time %.1fs",time.time()-t0); return summary
 
+
+
+TTL_COMPOSITE_FORENSICS_DEFAULT_VARIANTS=(
+    "Residual_60_N12_TTL90",
+    "Residual_60_N12_TTL90_Renew30_Composite",
+    "Residual_65_N12_TTL90",
+    "Residual_65_N12_TTL90_Renew30_Composite",
+    "Baseline_N12_TTL90",
+    "Residual_60_N12_TTL120",
+    "Residual_60_N12_TTL90_Renew30_Rank",
+    "Residual_60_N12_TTL90_Renew30_Residual",
+)
+TTL_COMPOSITE_FORENSICS_CORE_VARIANTS=TTL_COMPOSITE_FORENSICS_DEFAULT_VARIANTS[:4]
+TTL_FORENSICS_REQUIRED_FILES=("variant_summary.csv","cost_adjusted_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv","turnover.csv","trade_log.csv","holding_periods.csv","renewal_decisions.csv","ttl_event_log.csv","audit_metadata.json")
+TTL_FORENSICS_IMPORTANT_FILES=("variant_summary.csv","cost_adjusted_summary.csv","trade_log.csv","renewal_decisions.csv","holding_periods.csv")
+TTL_FORENSICS_OUTPUT_FILES=("forensics_summary.csv","forensics_summary.json","candidate_comparison.csv","active_exposure_daily.csv","active_exposure_summary.csv","annual_return_selected.csv","monthly_return_selected.csv","stress_year_2022.csv","drawdown_episodes.csv","renewal_condition_summary.csv","renewal_decision_by_year.csv","renewal_decision_by_market.csv","holding_period_summary.csv","trade_activity_summary.csv","ticker_contribution_summary.csv","cash_drag_proxy.csv","future_data_boundary_review.csv","complexity_scorecard.csv","ttl_composite_forensics_report.md","audit_metadata.json")
+
+def _read_artifact_csv(source,name,index_col=None):
+    path=Path(source)/name
+    if not path.exists(): return pd.DataFrame()
+    try: return pd.read_csv(path,index_col=index_col)
+    except Exception as exc: LOG.warning("failed to read %s: %s",path,exc); return pd.DataFrame()
+
+def _variant_col(df):
+    for c in ("Variant","variant","index"):
+        if c in df.columns: return c
+    return None
+
+def _filter_variants(df,variants):
+    if df is None or df.empty: return pd.DataFrame()
+    out=df.copy(); vc=_variant_col(out)
+    if vc: return out[out[vc].astype(str).isin(variants)].copy()
+    out.index=out.index.astype(str); return out.loc[out.index.intersection(variants)].copy()
+
+def _num(s): return pd.to_numeric(s,errors="coerce")
+
+def _load_ttl_forensics_artifacts(source_dir):
+    LOG.info("artifact loading start: %s",source_dir)
+    source=Path(source_dir); artifacts={}; missing=[]
+    for name in TTL_FORENSICS_REQUIRED_FILES:
+        path=source/name
+        if not path.exists(): missing.append(name); artifacts[name]=pd.DataFrame() if name.endswith('.csv') else {}
+        elif name.endswith('.json'):
+            try: artifacts[name]=json.loads(path.read_text(encoding='utf-8'))
+            except Exception as exc: LOG.warning("failed to read %s: %s",path,exc); artifacts[name]={}
+        else:
+            idx=0 if name in ("variant_summary.csv","cost_adjusted_summary.csv","annual_returns.csv","monthly_returns.csv","drawdown_series.csv") else None
+            artifacts[name]=_read_artifact_csv(source,name,index_col=idx)
+    optional=[]
+    for name in ("ttl_renewal_report.md","data_quality.csv","insufficient_history_summary.csv"):
+        if (source/name).exists(): optional.append(name)
+    important_missing=[m for m in missing if m in TTL_FORENSICS_IMPORTANT_FILES]
+    if important_missing: LOG.warning("important forensics source files missing: %s", important_missing)
+    LOG.info("artifact loading end")
+    return artifacts,missing,important_missing,optional
+
+def _selected_variants_arg(variants):
+    return [v.strip() for v in variants.split(',') if v.strip()] if variants else list(TTL_COMPOSITE_FORENSICS_DEFAULT_VARIANTS)
+
+def _write_df(df,path,index=False):
+    if df is None: df=pd.DataFrame()
+    df.to_csv(path,index=index)
+
+def _active_exposure(trade_log, variants, start=None, end=None):
+    if trade_log.empty or not {"variant","date","action","weight"}.issubset(trade_log.columns):
+        return pd.DataFrame(), pd.DataFrame([{"variant":v,"average_active_exposure":np.nan,"exposure_judgment":"unavailable"} for v in variants])
+    tl=trade_log[trade_log.variant.astype(str).isin(variants)].copy(); tl["date"]=pd.to_datetime(tl["date"],errors="coerce"); tl["weight"]=_num(tl["weight"]).fillna(0); tl=tl.dropna(subset=["date"])
+    if tl.empty: return pd.DataFrame(), pd.DataFrame()
+    start=pd.Timestamp(start) if start else tl.date.min(); end=pd.Timestamp(end) if end else tl.date.max(); dates=pd.bdate_range(start,end); rows=[]
+    for v,g in tl.groupby("variant"):
+        active={}
+        for d in dates:
+            day=g[g.date==d]
+            for _,r in day.iterrows():
+                if str(r.action).upper()=="BUY": active[str(r.ticker)]=float(r.weight)
+                elif str(r.action).upper()=="SELL": active.pop(str(r.ticker),None)
+            aw=float(sum(active.values())); rows.append({"date":d,"variant":v,"active_weight":aw,"active_position_count":len(active),"cash_weight":max(0,1-aw)})
+    daily=pd.DataFrame(rows)
+    summ=[]
+    for v,g in daily.groupby("variant"):
+        avg=float(g.active_weight.mean())
+        judgment="ほぼフル投資" if avg>=.95 else "適度な免疫系" if avg>=.80 else "キャッシュ寄与が大きい。慎重評価" if avg>=.60 else "ほぼ別戦略。採用注意"
+        summ.append({"variant":v,"full_invested_days_ratio":float((g.active_weight>=.99).mean()),"below_90pct_exposure_days_ratio":float((g.active_weight<.90).mean()),"below_80pct_exposure_days_ratio":float((g.active_weight<.80).mean()),"below_70pct_exposure_days_ratio":float((g.active_weight<.70).mean()),"average_active_exposure":avg,"median_active_exposure":float(g.active_weight.median()),"min_active_exposure":float(g.active_weight.min()),"average_active_position_count":float(g.active_position_count.mean()),"average_cash_weight":float(g.cash_weight.mean()),"exposure_judgment":judgment})
+    return daily,pd.DataFrame(summ)
+
+def _renewal_summaries(rd, variants):
+    if rd.empty or "variant" not in rd: return pd.DataFrame(),pd.DataFrame(),pd.DataFrame()
+    d=rd[rd.variant.astype(str).isin(variants)].copy()
+    for c in ("renewed","rank_pass","residual_pass","price_above_50dma","composite_pass"):
+        if c in d: d[c]=d[c].astype(str).str.lower().isin(["true","1","yes"])
+    if "health_check_date" in d: d["year"]=pd.to_datetime(d.health_check_date,errors="coerce").dt.year
+    agg=[]
+    for v,g in d.groupby("variant"):
+        agg.append({"variant":v,"decisions":len(g),"renewed_count":int(g.get("renewed",pd.Series(dtype=bool)).sum()),"renewal_rate":float(g.get("renewed",pd.Series(dtype=bool)).mean()) if len(g) and "renewed" in g else np.nan,"rank_pass_rate":float(g.rank_pass.mean()) if "rank_pass" in g else np.nan,"residual_pass_rate":float(g.residual_pass.mean()) if "residual_pass" in g else np.nan,"price_above_50dma_pass_rate":float(g.price_above_50dma.mean()) if "price_above_50dma" in g else np.nan,"composite_pass_rate":float(g.composite_pass.mean()) if "composite_pass" in g else np.nan,"average_composite_count":float(_num(g.composite_count).mean()) if "composite_count" in g else np.nan})
+    by_year=d.groupby(["variant","year"],dropna=False).agg(decisions=("variant","size"),renewal_rate=("renewed","mean"),composite_count=("composite_count","mean"),rank_pass_rate=("rank_pass","mean"),residual_pass_rate=("residual_pass","mean"),price_pass_rate=("price_above_50dma","mean")).reset_index() if "year" in d and "renewed" in d else pd.DataFrame()
+    market_col="Region" if "Region" in d else "region" if "region" in d else None
+    by_market=d.groupby(["variant",market_col],dropna=False).agg(decisions=("variant","size"),renewal_rate=("renewed","mean"),rank_pass_rate=("rank_pass","mean"),residual_pass_rate=("residual_pass","mean"),price_pass_rate=("price_above_50dma","mean"),rejected_count=("renewed",lambda x:int((~x).sum()))).reset_index().rename(columns={market_col:"market"}) if market_col and "renewed" in d else pd.DataFrame()
+    return pd.DataFrame(agg),by_year,by_market
+
+def _holding_summary(hp, variants):
+    if hp.empty or "variant" not in hp or "holding_days" not in hp: return pd.DataFrame()
+    d=hp[hp.variant.astype(str).isin(variants)].copy(); d["holding_days"]=_num(d.holding_days)
+    rows=[]
+    for v,g in d.groupby("variant"):
+        h=g.holding_days.dropna(); rows.append({"variant":v,"count":len(h),"mean_holding_days":float(h.mean()) if len(h) else np.nan,"median_holding_days":float(h.median()) if len(h) else np.nan,"max_holding_days":float(h.max()) if len(h) else np.nan,"min_holding_days":float(h.min()) if len(h) else np.nan,"percent_held_around_90_days":float(((h>=85)&(h<=95)).mean()) if len(h) else np.nan,"percent_extended_beyond_90_days":float((h>90).mean()) if len(h) else np.nan,"percent_reached_max_120_days":float((h>=120).mean()) if len(h) else np.nan,"bucket_le_90":int((h<=90).sum()),"bucket_91_105":int(((h>90)&(h<=105)).sum()),"bucket_106_120":int(((h>105)&(h<=120)).sum()),"bucket_gt_120":int((h>120).sum())})
+    return pd.DataFrame(rows)
+
+def _stress_2022(monthly, draw, exposure, renewal, variants):
+    rows=[]
+    for v in variants:
+        m=_num(monthly[v]) if v in monthly else pd.Series(dtype=float)
+        m.index=pd.to_datetime(m.index,errors="coerce")
+        m22=m[m.index.year==2022].dropna()
+        d=_num(draw[v]) if v in draw else pd.Series(dtype=float)
+        d.index=pd.to_datetime(d.index,errors="coerce")
+        d22=d[d.index.year==2022].dropna()
+        ex_df=pd.DataFrame()
+        if not exposure.empty and "date" in exposure and "variant" in exposure:
+            ex_dates=pd.to_datetime(exposure.date,errors="coerce")
+            ex_df=exposure[(exposure.variant==v)&(ex_dates.dt.year==2022)]
+        rd_df=pd.DataFrame()
+        if not renewal.empty and "health_check_date" in renewal and "variant" in renewal:
+            rd_dates=pd.to_datetime(renewal["health_check_date"],errors="coerce")
+            rd_df=renewal[(renewal.variant.astype(str)==v)&(rd_dates.dt.year==2022)]
+        renewed_bool=rd_df.renewed.astype(str).str.lower().isin(["true","1","yes"]) if not rd_df.empty and "renewed" in rd_df else pd.Series(dtype=bool)
+        rows.append({"variant":v,"return_2022":float((1+m22).prod()-1) if len(m22) else np.nan,"max_drawdown_2022":float(d22.min()) if len(d22) else np.nan,"worst_month_2022":float(m22.min()) if len(m22) else np.nan,"monthly_win_rate_2022":float((m22>0).mean()) if len(m22) else np.nan,"average_active_exposure_2022":float(ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else np.nan,"renewal_pass_rate_2022":float(renewed_bool.mean()) if len(renewed_bool) else np.nan,"cash_weight_proxy_2022":float(1-ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else np.nan,"forced_non_renewals_2022":int((~renewed_bool).sum()) if len(renewed_bool) else 0})
+    out=pd.DataFrame(rows)
+    pairs={"Residual_60_N12_TTL90_Renew30_Composite":"Residual_60_N12_TTL90","Residual_65_N12_TTL90_Renew30_Composite":"Residual_65_N12_TTL90"}
+    for comp,base in pairs.items():
+        if comp in out.variant.values and base in out.variant.values:
+            b=out.set_index("variant").loc[base]; idx=out.variant==comp; out.loc[idx,"return_2022_vs_fixed_delta"]=out.loc[idx,"return_2022"].values-b.return_2022; out.loc[idx,"maxdd_2022_vs_fixed_delta"]=out.loc[idx,"max_drawdown_2022"].values-b.max_drawdown_2022
+    return out
+
+def _drawdown_episodes(draw, exposure, renewal, variants):
+    rows=[]
+    for v in variants:
+        if v not in draw: continue
+        s=_num(draw[v]); s.index=pd.to_datetime(s.index,errors="coerce")
+        in_ep=False; start=None; trough=None; depth=0
+        for dt,val in s.dropna().items():
+            if val<0 and not in_ep:
+                in_ep=True; start=dt; trough=dt; depth=val
+            if in_ep and val<depth:
+                depth=val; trough=dt
+            if in_ep and val>=0:
+                ex_df=pd.DataFrame()
+                if not exposure.empty and {"variant","date"}.issubset(exposure.columns):
+                    ex_dates=pd.to_datetime(exposure.date,errors="coerce")
+                    ex_df=exposure[(exposure.variant==v)&(ex_dates>=start)&(ex_dates<=dt)]
+                rd_df=pd.DataFrame()
+                if not renewal.empty and "health_check_date" in renewal and "variant" in renewal:
+                    rd_dates=pd.to_datetime(renewal["health_check_date"],errors="coerce")
+                    rd_df=renewal[(renewal.variant.astype(str)==v)&(rd_dates.between(start,dt))]
+                rows.append({"variant":v,"drawdown_start_date":start,"drawdown_trough_date":trough,"recovery_date":dt,"max_drawdown_depth":depth,"days_to_trough":(trough-start).days,"days_to_recovery":(dt-start).days,"return_during_drawdown":depth,"active_exposure_during_drawdown":float(ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else np.nan,"renewal_decisions_around_drawdown":len(rd_df)})
+                in_ep=False
+        if in_ep:
+            rows.append({"variant":v,"drawdown_start_date":start,"drawdown_trough_date":trough,"recovery_date":pd.NaT,"max_drawdown_depth":depth,"days_to_trough":(trough-start).days,"days_to_recovery":np.nan,"return_during_drawdown":depth,"active_exposure_during_drawdown":np.nan,"renewal_decisions_around_drawdown":np.nan})
+    out=pd.DataFrame(rows)
+    return out.sort_values(["variant","max_drawdown_depth"]).groupby("variant").head(5).reset_index(drop=True) if not out.empty else out
+
+def _ticker_contrib(trade_log, variants):
+    if trade_log.empty or not {"variant","ticker","action"}.issubset(trade_log.columns): return pd.DataFrame()
+    d=trade_log[trade_log.variant.astype(str).isin(variants)].copy(); d["weight"]=_num(d.get("weight",0)).fillna(0)
+    rows=[]
+    for (v,t),g in d.groupby(["variant","ticker"]):
+        buys=int((g.action.astype(str).str.upper()=="BUY").sum()); sells=int((g.action.astype(str).str.upper()=="SELL").sum())
+        rows.append({"variant":v,"ticker":t,"approx_trade_count":len(g),"buy_count":buys,"sell_count":sells,"approx_weight_used":float(g.weight.abs().sum()),"market":"JP" if str(t).endswith(".T") else "US","approximation_note":"Trade-log activity proxy; exact PnL contribution requires position-level returns."})
+    out=pd.DataFrame(rows)
+    if out.empty: return out
+    totals=out.groupby("variant").approx_weight_used.transform("sum").replace(0,np.nan); out["approx_contribution_share"]=out.approx_weight_used/totals
+    return out.sort_values(["variant","approx_contribution_share"],ascending=[True,False])
+
+def _future_boundary_review(rd):
+    rows=[{"check":"health_check_date near trade_date + 90 days","status":"not_available","details":"renewal_decisions.csv unavailable"},{"check":"renewal inputs as-of health_check_date","status":"implementation_review","details":"_health_row uses asof_prices(prices, date) and score functions bounded to date."},{"check":"50DMA uses prior/as-of prices only","status":"implementation_review","details":"_health_row builds s=asof_prices(prices,date).ffill()[ticker] before tail(50)."},{"check":"rank/residual as-of boundary","status":"implementation_review","details":"_select_ttl_candidates and compute_residual_momentum_score receive health_check date."},{"check":"weekly degradation boundary","status":"implementation_review","details":"run_ttl_renewal_variant passes each weekly check date into _health_row."}]
+    if not rd.empty and {"trade_date","health_check_date"}.issubset(rd.columns):
+        d=rd.copy(); diff=(pd.to_datetime(d.health_check_date,errors="coerce")-pd.to_datetime(d.trade_date,errors="coerce")).dt.days
+        rows[0]={"check":"health_check_date near trade_date + 90 days","status":"pass" if diff.dropna().between(85,125).all() else "warning","details":f"observed_min_days={diff.min()}, observed_max_days={diff.max()}, rows={len(diff.dropna())}"}
+    return pd.DataFrame(rows)
+
+def _complexity_scorecard(summary,cost,exposure,variants):
+    base_pairs=[("Residual_60_N12_TTL90","Residual_60_N12_TTL90_Renew30_Composite"),("Residual_65_N12_TTL90","Residual_65_N12_TTL90_Renew30_Composite")]
+    s=summary.copy(); c=cost.copy(); ex=exposure.set_index("variant") if not exposure.empty and "variant" in exposure else pd.DataFrame(); rows=[]
+    for base,comp in base_pairs:
+        if comp not in variants: continue
+        def val(df,row,col): return float(df.loc[row,col]) if row in df.index and col in df.columns and pd.notna(df.loc[row,col]) else np.nan
+        net_cagr=(val(c,comp,"Tax_Slippage_Adjusted_CAGR") or val(s,comp,"Tax_Slippage_Adjusted_CAGR"))-(val(c,base,"Tax_Slippage_Adjusted_CAGR") or val(s,base,"Tax_Slippage_Adjusted_CAGR"))
+        net_sharpe=(val(c,comp,"Net_Sharpe") or val(s,comp,"Net_Sharpe"))-(val(c,base,"Net_Sharpe") or val(s,base,"Net_Sharpe"))
+        net_calmar=(val(c,comp,"Net_Calmar") or val(s,comp,"Net_Calmar"))-(val(c,base,"Net_Calmar") or val(s,base,"Net_Calmar"))
+        maxdd_reduction=val(s,comp,"Max_Drawdown")-val(s,base,"Max_Drawdown")
+        turnover_change=val(s,comp,"Turnover")-val(s,base,"Turnover")
+        active_drop=(val(ex,base,"average_active_exposure")-val(ex,comp,"average_active_exposure")) if not ex.empty else np.nan
+        decision="Adopt with caution" if (pd.isna(net_calmar) or net_calmar>0) and (pd.isna(active_drop) or active_drop<.25) else "Keep as research"
+        rows.append({"comparison":f"{base} vs {comp}","base_variant":base,"composite_variant":comp,"net_cagr_improvement":net_cagr,"net_sharpe_improvement":net_sharpe,"net_calmar_improvement":net_calmar,"maxdd_reduction":maxdd_reduction,"turnover_change":turnover_change,"active_exposure_drop":active_drop,"rule_complexity":"high","operational_burden":"medium","interpretability":"medium","failure_risk":"medium","final_judgment":decision})
+    return pd.DataFrame(rows)
+
+def _plain_table(df):
+    return df.to_string(index=False) if isinstance(df,pd.DataFrame) and not df.empty else "No data available."
+
+def write_ttl_composite_forensics_report(output_dir, meta, tables):
+    out=Path(output_dir); comp=_plain_table(tables.get("candidate_comparison",pd.DataFrame())) if not tables.get("candidate_comparison",pd.DataFrame()).empty else "No comparison data available."
+    exposure=_plain_table(tables.get("active_exposure_summary",pd.DataFrame())) if not tables.get("active_exposure_summary",pd.DataFrame()).empty else "No exposure data available."
+    stress=_plain_table(tables.get("stress_year_2022",pd.DataFrame())) if not tables.get("stress_year_2022",pd.DataFrame()).empty else "No 2022 data available."
+    complexity=_plain_table(tables.get("complexity_scorecard",pd.DataFrame())) if not tables.get("complexity_scorecard",pd.DataFrame()).empty else "No complexity data available."
+    report=f"""# TTL Composite Forensics Report
+
+## 1. Executive Summary
+This candidate-only forensic audit reviews TTL90_Renew30_Composite candidates using existing artifacts only by default. It is not a full universe search.
+
+## 2. Why this forensic audit was needed
+Composite renewal previously showed large MaxDD, Sharpe, and Calmar improvements; this report checks cash exposure, stress-year behavior, renewal conditions, concentration, future-data boundaries, and complexity.
+
+## 3. Data and artifact sources
+Source directory: `{meta.get('source_dir')}`. Missing files: {meta.get('missing_files',[])}. Important missing files: {meta.get('important_missing_files',[])}.
+
+## 4. Candidate variants
+Selected variants: {meta.get('selected_variants',[])}.
+
+## 5. Fixed TTL90 vs Composite Renewal
+{comp}
+
+## 6. Cost-adjusted comparison
+Cost model is approximate and is not tax advice. See `candidate_comparison.csv` for gross/net CAGR, Sharpe, Calmar, turnover, and drag fields when available.
+
+## 7. Active exposure analysis
+Exposure is reconstructed from BUY/SELL events and weights in `trade_log.csv`; cash weight is `1 - active_weight`. Judgment bands: 95-100% nearly full invested, 80-95% moderate immune system, 60-80% large cash contribution, below 60% nearly a different strategy.
+
+{exposure}
+
+## 8. 2022 stress-year review
+{stress}
+
+## 9. Drawdown episode review
+Drawdown episodes are extracted from `drawdown_series.csv` by identifying below-zero drawdown intervals and troughs, then joining average exposure and renewal-decision counts where available.
+
+## 10. Renewal decision analysis
+Renewal decisions are grouped overall, by year, and by market. Pass rates are calculated for rank, residual, 50DMA price, and composite conditions where source columns are available.
+
+## 11. Holding period analysis
+Holding periods are bucketed into <=90, 91-105, 106-120, and >120 days to check whether renewal behaves like simple TTL120.
+
+## 12. Ticker contribution / concentration review
+Ticker contribution is approximate when only trade logs are available; activity and weight-use concentration proxies are reported.
+
+## 13. Future data boundary review
+Implementation review checks that renewal health checks call as-of bounded scoring and 50DMA logic; see `future_data_boundary_review.csv`.
+
+## 14. Complexity scorecard
+{complexity}
+
+## 15. Recommendation
+Keep `Residual_60_N12_TTL90` as the fixed-TTL control. Promote `Residual_60_N12_TTL90_Renew30_Composite` only if net metrics beat fixed TTL90 without a large active-exposure drop. Treat `Residual_65_N12_TTL90_Renew30_Composite` as the more aggressive candidate. If average exposure falls below 80%, classify the improvement as materially cash-driven and require caution. A further FULL audit is not required for this candidate-forensics purpose, but remains useful before production standardization.
+
+## 16. Safety notes
+This is research, not investment advice. Past performance does not guarantee future results. Free-data artifacts may contain survivorship bias, missing data, adjusted-price artifacts, and approximate cost assumptions.
+"""
+    (out/"ttl_composite_forensics_report.md").write_text(report,encoding="utf-8")
+    Path("reports").mkdir(exist_ok=True); Path("reports/ttl_composite_forensics_report.md").write_text(report,encoding="utf-8")
+
+def run_ttl_composite_forensics_audit(source_dir="artifacts/ttl_renewal_quick",output_dir="artifacts/ttl_composite_forensics",cache_dir=None,rerun_selected=False,variants=None,quick=False,force_refresh_cache=False):
+    t0=time.time(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); Path("reports").mkdir(exist_ok=True)
+    LOG.info("audit start: ttl_composite_forensics")
+    selected=_selected_variants_arg(variants); LOG.info("selected variants: %s", selected)
+    if rerun_selected: LOG.warning("rerun-selected requested; candidate-only recomputation is not run by default in this lightweight artifact forensics path")
+    artifacts,missing,important_missing,optional=_load_ttl_forensics_artifacts(source_dir)
+    summary=_filter_variants(artifacts.get("variant_summary.csv",pd.DataFrame()),selected); cost=_filter_variants(artifacts.get("cost_adjusted_summary.csv",pd.DataFrame()),selected)
+    annual=_filter_variants(artifacts.get("annual_returns.csv",pd.DataFrame()).T,selected).T if not artifacts.get("annual_returns.csv",pd.DataFrame()).empty else pd.DataFrame()
+    monthly=_filter_variants(artifacts.get("monthly_returns.csv",pd.DataFrame()).T,selected).T if not artifacts.get("monthly_returns.csv",pd.DataFrame()).empty else pd.DataFrame()
+    draw=_filter_variants(artifacts.get("drawdown_series.csv",pd.DataFrame()).T,selected).T if not artifacts.get("drawdown_series.csv",pd.DataFrame()).empty else pd.DataFrame()
+    trade=_filter_variants(artifacts.get("trade_log.csv",pd.DataFrame()),selected); holds=_filter_variants(artifacts.get("holding_periods.csv",pd.DataFrame()),selected); rd=_filter_variants(artifacts.get("renewal_decisions.csv",pd.DataFrame()),selected); turnover=_filter_variants(artifacts.get("turnover.csv",pd.DataFrame()),selected)
+    LOG.info("exposure analysis start"); exposure_daily,exposure_summary=_active_exposure(trade,[v for v in TTL_COMPOSITE_FORENSICS_CORE_VARIANTS if v in selected]); LOG.info("exposure analysis end")
+    LOG.info("renewal analysis start"); renewal_summary,renewal_year,renewal_market=_renewal_summaries(rd,selected); LOG.info("renewal analysis end")
+    holding_summary=_holding_summary(holds,selected)
+    LOG.info("drawdown analysis start"); stress=_stress_2022(monthly,draw,exposure_daily,rd,selected); episodes=_drawdown_episodes(draw,exposure_daily,rd,selected); LOG.info("drawdown analysis end")
+    ticker=_ticker_contrib(trade,selected)
+    future=_future_boundary_review(rd)
+    complexity=_complexity_scorecard(summary,cost,exposure_summary,selected)
+    cash=exposure_summary[["variant","average_active_exposure","average_cash_weight","exposure_judgment"]].copy() if not exposure_summary.empty and "average_cash_weight" in exposure_summary else pd.DataFrame()
+    candidate=summary.copy();
+    if not cost.empty: candidate=candidate.join(cost,rsuffix="_cost",how="left")
+    if not exposure_summary.empty: candidate=candidate.join(exposure_summary.set_index("variant"),how="left")
+    forensics=complexity.copy() if not complexity.empty else pd.DataFrame({"selected_variants":selected})
+    LOG.info("report writing start")
+    _write_df(forensics,out/"forensics_summary.csv"); (out/"forensics_summary.json").write_text(forensics.to_json(orient="records",indent=2),encoding="utf-8")
+    for name,df,idx in (("candidate_comparison.csv",candidate,True),("active_exposure_daily.csv",exposure_daily,False),("active_exposure_summary.csv",exposure_summary,False),("annual_return_selected.csv",annual,True),("monthly_return_selected.csv",monthly,True),("stress_year_2022.csv",stress,False),("drawdown_episodes.csv",episodes,False),("renewal_condition_summary.csv",renewal_summary,False),("renewal_decision_by_year.csv",renewal_year,False),("renewal_decision_by_market.csv",renewal_market,False),("holding_period_summary.csv",holding_summary,False),("trade_activity_summary.csv",turnover,False),("ticker_contribution_summary.csv",ticker,False),("cash_drag_proxy.csv",cash,False),("future_data_boundary_review.csv",future,False),("complexity_scorecard.csv",complexity,False)): _write_df(df,out/name,index=idx)
+    meta={"audit_name":"ttl_composite_forensics","source_dir":str(source_dir),"cache_dir":str(cache_dir) if cache_dir else "","selected_variants":selected,"default_download_allowed":False,"default_full_variant_recalculation_allowed":False,"rerun_selected_requested":bool(rerun_selected),"quick":bool(quick),"force_refresh_cache":bool(force_refresh_cache),"missing_files":missing,"important_missing_files":important_missing,"optional_files_found":optional,"output_files":list(TTL_FORENSICS_OUTPUT_FILES),"wall_time_seconds":round(time.time()-t0,2)}
+    (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
+    write_ttl_composite_forensics_report(out,meta,{"candidate_comparison":candidate.reset_index().rename(columns={"index":"variant"}),"active_exposure_summary":exposure_summary,"stress_year_2022":stress,"complexity_scorecard":complexity})
+    LOG.info("report writing end"); LOG.info("audit complete with wall time %.1fs",time.time()-t0)
+    return forensics
+
 def write_ttl_renewal_report(summary,data_quality,metadata,output_dir="artifacts/ttl_renewal"):
     base="Residual_60_N12_TTL90" if "Residual_60_N12_TTL90" in summary.index else (summary.index[0] if len(summary) else "")
     best=summary.Calmar.idxmax() if len(summary) and "Calmar" in summary else ""
@@ -1255,9 +1545,11 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--source-dir",default="artifacts/ttl_renewal_quick"); ap.add_argument("--rerun-selected",action="store_true"); ap.add_argument("--variants"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal","ttl_composite_forensics"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
+        if args.audit=="ttl_composite_forensics":
+            summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
         us,jp=get_live_universe()
         if args.audit=="ttl_renewal":
             summary=run_ttl_renewal_audit(None,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
@@ -1269,6 +1561,8 @@ def main():
             summary=run_residual_live_validation(None,us,jp,args.start,args.end,args.output_dir); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover","Judgment"]].to_string()); return
         requested=list(dict.fromkeys([*us,*jp,"^GSPC","^N225",*BENCHMARKS.values(),"^TOPX"])); p=download_live_prices(requested,args.start,args.end)
         if p.empty: raise SystemExit("live mode error: yfinance produced no usable adjusted-close prices")
+    if args.audit=="ttl_composite_forensics":
+        summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
     if args.audit=="ttl_renewal":
         summary=run_ttl_renewal_audit(p,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
     if args.audit=="residual_concentration":

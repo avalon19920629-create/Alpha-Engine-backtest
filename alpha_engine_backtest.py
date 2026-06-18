@@ -1431,6 +1431,42 @@ def write_r100_experiment_report(out, meta, tables):
         lines.append("")
     (out/"r100_experiment_report.md").write_text("\n".join(lines),encoding="utf-8"); Path("reports").mkdir(exist_ok=True); Path("reports/r100_experiment_report.md").write_text("\n".join(lines),encoding="utf-8")
 
+
+
+def _r100_read_partial_summary(path, selected):
+    if not Path(path).exists():
+        return pd.DataFrame()
+    df=pd.read_csv(path)
+    if 'Variant' not in df.columns:
+        return pd.DataFrame()
+    df=df.drop_duplicates('Variant',keep='last')
+    return df[df['Variant'].astype(str).isin(selected)].set_index('Variant')
+
+def _r100_read_existing_output(path, selected, variant_col='variant', index_col=None):
+    if not Path(path).exists():
+        return pd.DataFrame()
+    try:
+        df=pd.read_csv(path,index_col=index_col)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+    if variant_col in df.columns:
+        return df[df[variant_col].astype(str).isin(selected)].copy()
+    if index_col is not None:
+        return df[df.index.astype(str).isin(selected)].copy()
+    return df
+
+def _r100_merge_variant_rows(old, new, selected, variant_col='variant'):
+    frames=[x for x in (old,new) if x is not None and not x.empty]
+    if not frames:
+        return pd.DataFrame()
+    out=pd.concat(frames,ignore_index=True,sort=False)
+    if variant_col in out.columns:
+        out=out[out[variant_col].astype(str).isin(selected)]
+        order={v:i for i,v in enumerate(selected)}
+        out['_r100_order']=out[variant_col].map(order)
+        out=out.drop_duplicates(variant_col,keep='last').sort_values('_r100_order').drop(columns='_r100_order')
+    return out
+
 def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/r100_composite_experiment",source_dir="artifacts/ttl_composite_forensics",cache_dir=None,resume=False,variants=None,only_variant=None,quick=False,force_refresh_cache=False,tax_rate=0.20315,slippage_bps=10,no_detail_logs=True):
     t0=time.time(); end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True); reset_insufficient_history_warnings(); LOG.info("audit start: r100_composite_experiment")
     if us is None or jp is None: us,jp=get_live_universe()
@@ -1445,8 +1481,18 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
     dq,_,_,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end); us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
     completed=set(); cp=out/"completed_variants.csv"; partial=out/"variant_summary_partial.csv"; costpartial=out/"cost_adjusted_summary_partial.csv"
     if resume and cp.exists(): completed=set(pd.read_csv(cp).variant.astype(str));
-    if resume and completed and (not partial.exists() or not costpartial.exists()): LOG.warning("resume requested but partial summaries are missing; completed variants will be recomputed"); completed=set()
-    returns={}; selected_rows=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; partial_rows=[]; cost_rows=[]
+    completed={v for v in completed if v in selected}
+    partial_summary=_r100_read_partial_summary(partial,selected) if resume else pd.DataFrame()
+    partial_cost=_r100_read_partial_summary(costpartial,selected) if resume else pd.DataFrame()
+    if resume and completed:
+        valid_completed={v for v in completed if v in partial_summary.index and v in partial_cost.index}
+        missing=sorted(completed-valid_completed)
+        if missing: LOG.warning("resume partial summaries missing completed variants; recomputing: %s",missing)
+        completed=valid_completed
+    existing_exposure_summary=_r100_read_existing_output(out/"r100_active_exposure_summary.csv",selected) if resume else pd.DataFrame()
+    existing_stress=_r100_read_existing_output(out/"r100_stress_year_2022.csv",selected) if resume else pd.DataFrame()
+    existing_conc=_r100_read_existing_output(out/"r100_concentration_risk_summary.csv",selected) if resume else pd.DataFrame()
+    returns={}; selected_rows=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; partial_rows=partial_summary.reset_index().to_dict('records') if not partial_summary.empty else []; cost_rows=partial_cost.reset_index().to_dict('records') if not partial_cost.empty else []
     for v in vars_cfg:
         if resume and v['name'] in completed: LOG.info("variant skip completed: %s",v['name']); continue
         LOG.info("variant start: %s",v['name'])
@@ -1456,15 +1502,16 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
         nr,slip,tax=_cost_adjusted_returns(r,tu,tax_rate,slippage_bps); nm=metrics(nr); crow={'Variant':v['name'],'Slippage_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,0,slippage_bps)[0]),'Tax_Adjusted_CAGR':cagr(_cost_adjusted_returns(r,tu,tax_rate,0)[0]),'Tax_Slippage_Adjusted_CAGR':nm['CAGR'],'Estimated_Tax_Drag':summ['CAGR']-nm['CAGR'],'Estimated_Slippage_Drag':slip,'Net_Sharpe':nm['Sharpe'],'Net_Calmar':nm['Calmar']}; cost_rows.append(crow)
         pd.DataFrame(partial_rows).to_csv(partial,index=False); pd.DataFrame(cost_rows).to_csv(costpartial,index=False); pd.DataFrame([{'variant':v['name'],'completed_at':pd.Timestamp.now('UTC').isoformat()}]).to_csv(cp,mode='a',header=not cp.exists(),index=False); LOG.info("partial output writing: %s",v['name']); LOG.info("variant end: %s",v['name'])
     
-    if resume and not returns:
-        LOG.info("resume found no variants to run; existing partial outputs retained")
-        return pd.DataFrame()
     turnover=pd.concat(turns,ignore_index=True) if turns else pd.DataFrame(); trade_log=pd.concat(trades,ignore_index=True) if trades else pd.DataFrame(); holding_periods=pd.concat(holds,ignore_index=True) if holds else pd.DataFrame(); renewal_decisions=pd.concat(decisions,ignore_index=True) if decisions else pd.DataFrame(); ttl_event_log=pd.concat(events,ignore_index=True) if events else pd.DataFrame()
-    summary=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary.index.name='Variant'
-    if not turnover.empty: summary['Turnover']=turnover.groupby('variant').turnover.mean()
-    annual=pd.DataFrame({k:(1+v).resample('YE').prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample('ME').prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()}); cost=pd.DataFrame(cost_rows).set_index('Variant') if cost_rows else pd.DataFrame(); summary=_summary_extras(summary,annual,monthly); summary=summary.join(cost,how='left') if not cost.empty else summary
+    summary_new=pd.DataFrame({k:metrics(v) for k,v in returns.items()}).T; summary_new.index.name='Variant'
+    if not turnover.empty and not summary_new.empty: summary_new['Turnover']=turnover.groupby('variant').turnover.mean()
+    annual=pd.DataFrame({k:(1+v).resample('YE').prod()-1 for k,v in returns.items()}); monthly=pd.DataFrame({k:(1+v).resample('ME').prod()-1 for k,v in returns.items()}); draw=pd.DataFrame({k:((1+v).cumprod()/(1+v).cumprod().cummax()-1) for k,v in returns.items()}); cost=pd.DataFrame(cost_rows).drop_duplicates('Variant',keep='last').set_index('Variant') if cost_rows else pd.DataFrame(); summary_new=_summary_extras(summary_new,annual,monthly) if not summary_new.empty else summary_new
+    summary=pd.concat([partial_summary,summary_new],sort=False) if not partial_summary.empty else summary_new
+    summary=summary[~summary.index.duplicated(keep='last')]; summary=summary.reindex([v for v in selected if v in summary.index])
+    summary=summary.join(cost,how='left',rsuffix='_cost') if not cost.empty else summary
+    pd.DataFrame(partial_rows).drop_duplicates('Variant',keep='last').to_csv(partial,index=False) if partial_rows else None; pd.DataFrame(cost_rows).drop_duplicates('Variant',keep='last').to_csv(costpartial,index=False) if cost_rows else None
     LOG.info("exposure analysis start"); exposure_daily,exposure_summary=_active_exposure(trade_log,selected,start,end); LOG.info("exposure analysis end")
-    renewal_summary,renewal_year,_=_renewal_summaries(renewal_decisions,selected); holding_summary=_holding_summary(holding_periods,selected); LOG.info("stress analysis start"); stress=_stress_2022(monthly,draw,exposure_daily,renewal_decisions,selected); LOG.info("stress analysis end"); episodes=_drawdown_episodes(draw,exposure_daily,renewal_decisions,selected); ticker=_ticker_contrib(trade_log,selected); conc,split=_concentration_risk(ticker,selected); future=_future_boundary_review(renewal_decisions,{'monthly_returns.csv':monthly,'annual_returns.csv':annual,'drawdown_series.csv':draw,'renewal_decisions.csv':renewal_decisions}); complexity=pd.DataFrame([{'variant':v,'rule_complexity':'high' if 'Composite' in v else 'low','full_sweep':False,'score_components_full_output':False} for v in selected]); over=_r100_overdrive(summary,cost,exposure_summary,stress,conc)
+    renewal_summary,renewal_year,_=_renewal_summaries(renewal_decisions,selected); holding_summary=_holding_summary(holding_periods,selected); LOG.info("stress analysis start"); stress_new=_stress_2022(monthly,draw,exposure_daily,renewal_decisions,selected); stress=_r100_merge_variant_rows(existing_stress,stress_new,selected); LOG.info("stress analysis end"); episodes=_drawdown_episodes(draw,exposure_daily,renewal_decisions,selected); ticker=_ticker_contrib(trade_log,selected); conc_new,split=_concentration_risk(ticker,selected); conc=_r100_merge_variant_rows(existing_conc,conc_new,selected); exposure_summary=_r100_merge_variant_rows(existing_exposure_summary,exposure_summary,selected); future=_future_boundary_review(renewal_decisions,{'monthly_returns.csv':monthly,'annual_returns.csv':annual,'drawdown_series.csv':draw,'renewal_decisions.csv':renewal_decisions}); complexity=pd.DataFrame([{'variant':v,'rule_complexity':'high' if 'Composite' in v else 'low','full_sweep':False,'score_components_full_output':False} for v in selected]); over=_r100_overdrive(summary,cost,exposure_summary,stress,conc)
     refs=[]
     if source_dir and Path(source_dir).exists():
         for name in ('forensics_summary.csv','candidate_comparison.csv','variant_summary.csv','cost_adjusted_summary.csv'):

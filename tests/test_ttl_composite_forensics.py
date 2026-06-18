@@ -64,3 +64,28 @@ def test_missing_important_files_warns_but_does_not_crash(tmp_path, caplog):
     assert "trade_log.csv" in meta["important_missing_files"]
     assert (out/"active_exposure_summary.csv").exists()
 
+
+def test_future_boundary_review_classifies_end_of_sample_partial_cycle():
+    rd=pd.DataFrame([
+        {"variant":"v","ticker":"AAA","screen_date":"2022-10-03","trade_date":"2022-10-17","health_check_date":"2022-12-31"},
+        {"variant":"v","ticker":"BBB","screen_date":"2022-10-04","trade_date":"2022-10-17","health_check_date":"2022-12-31"},
+    ])
+    artifacts={
+        "monthly_returns.csv":pd.DataFrame({"v":[.01]},index=pd.to_datetime(["2022-12-31"])),
+        "drawdown_series.csv":pd.DataFrame({"v":[0]},index=pd.to_datetime(["2022-12-31"])),
+        "trade_log.csv":pd.DataFrame({"date":["2022-12-31"]}),
+    }
+    out=aeb._future_boundary_review(rd,artifacts)
+    row=out[out.check=="health_check_date near trade_date + 90 days"].iloc[0]
+    assert row.status=="end_of_sample_partial_cycle"
+    assert "end-of-sample truncation" in row.details
+    assert "not future leakage" in row.details
+
+
+def test_future_boundary_review_keeps_warning_when_returns_exist_after_short_cycle():
+    rd=pd.DataFrame([{"variant":"v","ticker":"AAA","screen_date":"2022-10-03","trade_date":"2022-10-17","health_check_date":"2022-12-31"}])
+    artifacts={"monthly_returns.csv":pd.DataFrame({"v":[.01,.02]},index=pd.to_datetime(["2022-12-31","2023-01-31"]))}
+    out=aeb._future_boundary_review(rd,artifacts)
+    row=out[out.check=="health_check_date near trade_date + 90 days"].iloc[0]
+    assert row.status=="warning"
+    assert "no_return_period_after_health_check=False" in row.details

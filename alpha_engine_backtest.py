@@ -1300,11 +1300,46 @@ def _ticker_contrib(trade_log, variants):
     totals=out.groupby("variant").approx_weight_used.transform("sum").replace(0,np.nan); out["approx_contribution_share"]=out.approx_weight_used/totals
     return out.sort_values(["variant","approx_contribution_share"],ascending=[True,False])
 
-def _future_boundary_review(rd):
+def _max_observed_date(df, columns=None, include_index=True):
+    dates=[]
+    if isinstance(df,pd.DataFrame) and not df.empty:
+        if include_index and not pd.api.types.is_integer_dtype(df.index):
+            idx=pd.to_datetime(df.index,errors="coerce")
+            if idx.notna().any(): dates.append(idx.max())
+        cols=columns if columns is not None else [c for c in df.columns if "date" in str(c).lower()]
+        for c in cols:
+            if c in df:
+                s=pd.to_datetime(df[c],errors="coerce")
+                if s.notna().any(): dates.append(s.max())
+    return max(dates) if dates else pd.NaT
+
+def _future_boundary_review(rd, artifacts=None):
     rows=[{"check":"health_check_date near trade_date + 90 days","status":"not_available","details":"renewal_decisions.csv unavailable"},{"check":"renewal inputs as-of health_check_date","status":"implementation_review","details":"_health_row uses asof_prices(prices, date) and score functions bounded to date."},{"check":"50DMA uses prior/as-of prices only","status":"implementation_review","details":"_health_row builds s=asof_prices(prices,date).ffill()[ticker] before tail(50)."},{"check":"rank/residual as-of boundary","status":"implementation_review","details":"_select_ttl_candidates and compute_residual_momentum_score receive health_check date."},{"check":"weekly degradation boundary","status":"implementation_review","details":"run_ttl_renewal_variant passes each weekly check date into _health_row."}]
     if not rd.empty and {"trade_date","health_check_date"}.issubset(rd.columns):
-        d=rd.copy(); diff=(pd.to_datetime(d.health_check_date,errors="coerce")-pd.to_datetime(d.trade_date,errors="coerce")).dt.days
-        rows[0]={"check":"health_check_date near trade_date + 90 days","status":"pass" if diff.dropna().between(85,125).all() else "warning","details":f"observed_min_days={diff.min()}, observed_max_days={diff.max()}, rows={len(diff.dropna())}"}
+        d=rd.copy(); trade=pd.to_datetime(d.trade_date,errors="coerce"); health=pd.to_datetime(d.health_check_date,errors="coerce")
+        diff=(health-trade).dt.days; valid=diff.dropna(); status="pass" if valid.between(85,125).all() else "warning"
+        details=f"observed_min_days={diff.min()}, observed_max_days={diff.max()}, rows={len(valid)}"
+        suspicious=d[diff<80].copy(); suspicious_health=health[diff<80]; suspicious_trade=trade[diff<80]
+        if status=="warning" and not suspicious.empty:
+            artifacts=artifacts or {}; end_candidates=[]
+            for name,df in artifacts.items():
+                if name=="renewal_decisions.csv": continue
+                dt=_max_observed_date(df) if isinstance(df,pd.DataFrame) else pd.NaT
+                if pd.notna(dt): end_candidates.append(dt)
+            source_end=max(end_candidates) if end_candidates else health.max()
+            audit_end=source_end
+            return_end=max([dt for dt in (_max_observed_date(artifacts.get("monthly_returns.csv",pd.DataFrame()),include_index=True),_max_observed_date(artifacts.get("annual_returns.csv",pd.DataFrame()),include_index=True),_max_observed_date(artifacts.get("drawdown_series.csv",pd.DataFrame()),include_index=True)) if pd.notna(dt)], default=pd.NaT)
+            screen=pd.to_datetime(suspicious.get("screen_date",pd.Series(index=suspicious.index,dtype="datetime64[ns]")),errors="coerce")
+            latest_suspicious=max([x for x in (screen.max(),suspicious_trade.max(),suspicious_health.max()) if pd.notna(x)], default=pd.NaT)
+            suspicious_near_end=pd.notna(source_end) and pd.notna(latest_suspicious) and (source_end-latest_suspicious).days<=3 and (source_end-suspicious_trade.min()).days<=100
+            health_matches_end=pd.notna(source_end) and suspicious_health.notna().all() and ((source_end-suspicious_health).dt.days.abs()<=3).all()
+            no_return_period=pd.isna(return_end) or return_end<=suspicious_health.max()
+            if len(suspicious)==int((diff<80).sum()) and suspicious_near_end and health_matches_end and no_return_period:
+                status="end_of_sample_partial_cycle"
+                details += f", suspicious_rows={len(suspicious)}, source_data_end_date={source_end.date()}, audit_end_date={audit_end.date()}, suspicious_trade_min={suspicious_trade.min().date()}, suspicious_health_max={suspicious_health.max().date()}, no_return_period_after_health_check={no_return_period}; classified as end-of-sample truncation, not future leakage"
+            else:
+                details += f", suspicious_rows={len(suspicious)}, source_data_end_date={source_end.date() if pd.notna(source_end) else 'not_available'}, audit_end_date={audit_end.date() if pd.notna(audit_end) else 'not_available'}, no_return_period_after_health_check={no_return_period}"
+        rows[0]={"check":"health_check_date near trade_date + 90 days","status":status,"details":details}
     return pd.DataFrame(rows)
 
 def _complexity_scorecard(summary,cost,exposure,variants):
@@ -1331,6 +1366,7 @@ def write_ttl_composite_forensics_report(output_dir, meta, tables):
     exposure=_plain_table(tables.get("active_exposure_summary",pd.DataFrame())) if not tables.get("active_exposure_summary",pd.DataFrame()).empty else "No exposure data available."
     stress=_plain_table(tables.get("stress_year_2022",pd.DataFrame())) if not tables.get("stress_year_2022",pd.DataFrame()).empty else "No 2022 data available."
     complexity=_plain_table(tables.get("complexity_scorecard",pd.DataFrame())) if not tables.get("complexity_scorecard",pd.DataFrame()).empty else "No complexity data available."
+    future=_plain_table(tables.get("future_data_boundary_review",pd.DataFrame())) if not tables.get("future_data_boundary_review",pd.DataFrame()).empty else "No future-data boundary data available."
     report=f"""# TTL Composite Forensics Report
 
 ## 1. Executive Summary
@@ -1372,7 +1408,9 @@ Holding periods are bucketed into <=90, 91-105, 106-120, and >120 days to check 
 Ticker contribution is approximate when only trade logs are available; activity and weight-use concentration proxies are reported.
 
 ## 13. Future data boundary review
-Implementation review checks that renewal health checks call as-of bounded scoring and 50DMA logic; see `future_data_boundary_review.csv`.
+Implementation review checks that renewal health checks call as-of bounded scoring and 50DMA logic. If short `days_to_health_check` rows are concentrated in the final observed cycle, match the source/audit end date, and have no subsequent return period, they are classified as `end_of_sample_partial_cycle` end-of-sample truncation rather than future leakage. See `future_data_boundary_review.csv`.
+
+{future}
 
 ## 14. Complexity scorecard
 {complexity}
@@ -1402,7 +1440,7 @@ def run_ttl_composite_forensics_audit(source_dir="artifacts/ttl_renewal_quick",o
     holding_summary=_holding_summary(holds,selected)
     LOG.info("drawdown analysis start"); stress=_stress_2022(monthly,draw,exposure_daily,rd,selected); episodes=_drawdown_episodes(draw,exposure_daily,rd,selected); LOG.info("drawdown analysis end")
     ticker=_ticker_contrib(trade,selected)
-    future=_future_boundary_review(rd)
+    future=_future_boundary_review(rd,artifacts)
     complexity=_complexity_scorecard(summary,cost,exposure_summary,selected)
     cash=exposure_summary[["variant","average_active_exposure","average_cash_weight","exposure_judgment"]].copy() if not exposure_summary.empty and "average_cash_weight" in exposure_summary else pd.DataFrame()
     candidate=summary.copy();
@@ -1414,7 +1452,7 @@ def run_ttl_composite_forensics_audit(source_dir="artifacts/ttl_renewal_quick",o
     for name,df,idx in (("candidate_comparison.csv",candidate,True),("active_exposure_daily.csv",exposure_daily,False),("active_exposure_summary.csv",exposure_summary,False),("annual_return_selected.csv",annual,True),("monthly_return_selected.csv",monthly,True),("stress_year_2022.csv",stress,False),("drawdown_episodes.csv",episodes,False),("renewal_condition_summary.csv",renewal_summary,False),("renewal_decision_by_year.csv",renewal_year,False),("renewal_decision_by_market.csv",renewal_market,False),("holding_period_summary.csv",holding_summary,False),("trade_activity_summary.csv",turnover,False),("ticker_contribution_summary.csv",ticker,False),("cash_drag_proxy.csv",cash,False),("future_data_boundary_review.csv",future,False),("complexity_scorecard.csv",complexity,False)): _write_df(df,out/name,index=idx)
     meta={"audit_name":"ttl_composite_forensics","source_dir":str(source_dir),"cache_dir":str(cache_dir) if cache_dir else "","selected_variants":selected,"default_download_allowed":False,"default_full_variant_recalculation_allowed":False,"rerun_selected_requested":bool(rerun_selected),"quick":bool(quick),"force_refresh_cache":bool(force_refresh_cache),"missing_files":missing,"important_missing_files":important_missing,"optional_files_found":optional,"output_files":list(TTL_FORENSICS_OUTPUT_FILES),"wall_time_seconds":round(time.time()-t0,2)}
     (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding="utf-8")
-    write_ttl_composite_forensics_report(out,meta,{"candidate_comparison":candidate.reset_index().rename(columns={"index":"variant"}),"active_exposure_summary":exposure_summary,"stress_year_2022":stress,"complexity_scorecard":complexity})
+    write_ttl_composite_forensics_report(out,meta,{"candidate_comparison":candidate.reset_index().rename(columns={"index":"variant"}),"active_exposure_summary":exposure_summary,"stress_year_2022":stress,"future_data_boundary_review":future,"complexity_scorecard":complexity})
     LOG.info("report writing end"); LOG.info("audit complete with wall time %.1fs",time.time()-t0)
     return forensics
 

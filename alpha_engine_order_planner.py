@@ -84,6 +84,29 @@ def _find_price_column(df: pd.DataFrame) -> str:
     raise ValueError("selected_tickers.csv does not contain a usable latest/reference price column.")
 
 
+def _invalid_reference_price_message(ticker: str) -> str:
+    return (
+        f"Invalid reference_price_local for {ticker}.\n"
+        "Expected one numeric latest price from Live Screener.\n"
+        "Re-run the Live Screener with a valid price output."
+    )
+
+
+def _validate_reference_price_local(value: Any, ticker: str) -> float:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or "\n" in text or "dtype:" in text or "Name:" in text:
+            raise ValueError(_invalid_reference_price_message(ticker))
+        value = text
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(_invalid_reference_price_message(ticker)) from None
+    if not math.isfinite(numeric) or numeric <= 0:
+        raise ValueError(_invalid_reference_price_message(ticker))
+    return numeric
+
+
 def _validate_inputs(selected: pd.DataFrame, total_capital_jpy: float, cash_buffer_pct: float, price_buffer_pct: float, us_order_unit: int, jp_order_unit: int) -> None:
     for col in ("ticker", "region", "Weight"):
         if col not in selected.columns:
@@ -125,10 +148,8 @@ def build_buy_order_plan(
         region = str(row["region"]).upper()
         weight = float(row["Weight"])
         target_jpy = deployable * weight
-        reference_price = float(row[price_col]) if pd.notna(row[price_col]) else math.nan
+        reference_price = _validate_reference_price_local(row[price_col], ticker)
         note_parts: list[str] = []
-        if not math.isfinite(reference_price) or reference_price <= 0:
-            raise ValueError(f"Invalid reference price for {ticker}: {row[price_col]}")
         if region == "US":
             currency = "USD"; order_unit = int(us_order_unit)
             buffered = reference_price * (1 + price_buffer_pct)

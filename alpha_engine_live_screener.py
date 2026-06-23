@@ -95,6 +95,49 @@ def _score_region(prices: pd.DataFrame, tickers: list[str], region: str, as_of_d
     return scored.reset_index(drop=True)
 
 
+def _latest_valid_close_for_ticker(prices: pd.DataFrame | pd.Series, ticker: str) -> tuple[float, str]:
+    """Return the latest non-NaN close-like scalar price and its date for one ticker."""
+    def _close_series(frame: pd.DataFrame) -> pd.Series:
+        if isinstance(frame.columns, pd.MultiIndex):
+            for level in range(frame.columns.nlevels):
+                values = frame.columns.get_level_values(level).astype(str)
+                close_cols = frame.loc[:, values.str.lower().isin(["close", "adj close"])]
+                if not close_cols.empty:
+                    frame = close_cols
+                    break
+        else:
+            preferred = [c for c in frame.columns if str(c).lower() in {"close", "adj close"}]
+            if preferred:
+                frame = frame[preferred]
+        if frame.shape[1] != 1:
+            raise ValueError(f"Could not isolate one close price series for {ticker}; got {frame.shape[1]} columns.")
+        return frame.iloc[:, 0]
+
+    data: pd.Series | pd.DataFrame
+    if isinstance(prices, pd.Series):
+        data = prices
+    elif ticker in prices.columns:
+        data = prices[ticker]
+    elif isinstance(prices.columns, pd.MultiIndex):
+        matches = []
+        for level in range(prices.columns.nlevels):
+            if ticker in prices.columns.get_level_values(level):
+                matches.append(prices.xs(ticker, axis=1, level=level, drop_level=False))
+        if not matches:
+            raise KeyError(f"{ticker} not found in price data")
+        data = matches[0]
+    else:
+        raise KeyError(f"{ticker} not found in price data")
+
+    series = _close_series(data) if isinstance(data, pd.DataFrame) else data
+    numeric = pd.to_numeric(series, errors="coerce").dropna()
+    numeric = numeric[np.isfinite(numeric.astype(float))]
+    if numeric.empty:
+        raise ValueError(f"No valid reference close price for {ticker}")
+    latest_date = pd.Timestamp(numeric.index[-1]).date().isoformat()
+    return float(numeric.iloc[-1]), latest_date
+
+
 def run_live_screening(prices: pd.DataFrame | None = None, us: list[str] | None = None, jp: list[str] | None = None, residual_ratio: int = RESIDUAL_RATIO, total_holdings: int = TOTAL_HOLDINGS, output_root: str | Path = DEFAULT_OUTPUT_ROOT, downloader=None) -> Path:
     """Run one current-date screening pass and write all live screening artifacts."""
     t0 = time.time(); started = pd.Timestamp.now("UTC")
@@ -129,8 +172,9 @@ def run_live_screening(prices: pd.DataFrame | None = None, us: list[str] | None 
     selected = pd.concat([us_rank[us_rank.adopted], jp_rank[jp_rank.adopted]], ignore_index=True)
     inv = 1 / selected["Volatility"].astype(float)
     selected["Weight"] = inv / inv.sum()
-    latest_prices = alpha.asof_prices(prices, data_end).ffill()
-    selected["reference_price_local"] = [latest_prices.get(t, np.nan) for t in selected["ticker"]]
+    reference_rows = [_latest_valid_close_for_ticker(prices, t) for t in selected["ticker"]]
+    selected["reference_price_local"] = pd.to_numeric([price for price, _ in reference_rows], errors="raise").astype(float)
+    selected["reference_price_date"] = [date for _, date in reference_rows]
     weights = selected[["ticker", "region", "Weight", "Volatility", "composite_score", "base_momentum_score", "residual_score", "benchmark"]].copy()
     score_components = pd.concat([us_rank, jp_rank], ignore_index=True)
     quality_rows = []
@@ -154,7 +198,7 @@ def _md_table(df: pd.DataFrame) -> str:
 
 
 def _write_report(out: Path, meta: dict, us_rank: pd.DataFrame, jp_rank: pd.DataFrame, selected: pd.DataFrame, weights: pd.DataFrame, failures: pd.DataFrame, dq: pd.DataFrame) -> None:
-    report = f"""# Alpha Engine Live Screener Report\n\n**LIVE SCREENING — not automatic trading**\n\n- residual_ratio: {meta['residual_ratio']}\n- total_holdings: {meta['total_holdings']} (US {meta['us_holdings']} / JP {meta['jp_holdings']})\n- data_end_date: {meta['data_end_date']}\n- runtime_seconds: {meta['runtime_seconds']}\n- git_commit_hash: {meta['git_commit_hash']}\n\n## US ranking top\n{_md_table(us_rank.head(20)[['rank_in_region','ticker','composite_score','base_momentum_score','residual_score','momentum_12m','momentum_6m','momentum_3m','Volatility','benchmark','adopted']])}\n\n## Japan ranking top\n{_md_table(jp_rank.head(20)[['rank_in_region','ticker','composite_score','base_momentum_score','residual_score','momentum_12m','momentum_6m','momentum_3m','Volatility','benchmark','adopted']])}\n\n## Final selected tickers and weights\n{_md_table(weights)}\n\n## Benchmark status\n```json\n{json.dumps(meta['benchmark_status'], indent=2, default=str)}\n```\n\n## Missing / excluded / notes\n- Requested tickers: {meta['requested_ticker_count']}\n- Successfully downloaded tickers: {meta['successful_ticker_count']}\n- Excluded tickers: {meta['excluded_ticker_count']}\n- Download failures: {0 if failures.empty else failures.ticker.nunique()}\n\n{_md_table(dq)}\n\nThis screener only ranks current candidates. It does not run backtests, TTL90/Renew30 holding logic, historical trade reconstruction, CAGR, Sharpe, MDD, annual returns, or automatic orders.\n"""
+    report = f"""# Alpha Engine Live Screener Report\n\n**LIVE SCREENING — not automatic trading**\n\n- residual_ratio: {meta['residual_ratio']}\n- total_holdings: {meta['total_holdings']} (US {meta['us_holdings']} / JP {meta['jp_holdings']})\n- data_end_date: {meta['data_end_date']}\n- runtime_seconds: {meta['runtime_seconds']}\n- git_commit_hash: {meta['git_commit_hash']}\n\n## US ranking top\n{_md_table(us_rank.head(20)[['rank_in_region','ticker','composite_score','base_momentum_score','residual_score','momentum_12m','momentum_6m','momentum_3m','Volatility','benchmark','adopted']])}\n\n## Japan ranking top\n{_md_table(jp_rank.head(20)[['rank_in_region','ticker','composite_score','base_momentum_score','residual_score','momentum_12m','momentum_6m','momentum_3m','Volatility','benchmark','adopted']])}\n\n## Final selected tickers and weights\n{_md_table(weights)}\n\n## Benchmark status\n```json\n{json.dumps(meta['benchmark_status'], indent=2, default=str)}\n```\n\n## Missing / excluded / notes\n- Requested tickers: {meta['requested_ticker_count']}\n- Successfully downloaded tickers: {meta['successful_ticker_count']}\n- Excluded tickers: {meta['excluded_ticker_count']}\n- Download failures: {0 if failures.empty else failures.ticker.nunique()}\n\n{_md_table(dq)}\n\nThe reference price for order planning is the last valid closing price (`reference_price_local`); verify it on the brokerage screen immediately before placing any manual order.\n\nThis screener only ranks current candidates. It does not run backtests, TTL90/Renew30 holding logic, historical trade reconstruction, CAGR, Sharpe, MDD, annual returns, or automatic orders.\n"""
     (out / "screen_report.md").write_text(report, encoding="utf-8")
 
 

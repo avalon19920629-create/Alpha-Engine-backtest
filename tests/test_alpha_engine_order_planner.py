@@ -60,8 +60,30 @@ def test_usd_jpy_unspecified_and_unavailable_stops_safely(tmp_path, monkeypatch)
 
 
 def test_missing_price_does_not_continue_silently(tmp_path):
-    with pytest.raises(ValueError, match="Invalid reference price"):
+    with pytest.raises(ValueError, match="Invalid reference_price_local"):
         planner.build_buy_order_plan(_screen_run(tmp_path, missing_price=True), usd_jpy_rate=158.0)
+
+
+def test_series_string_reference_price_stops_with_explicit_contract_error(tmp_path):
+    run = _screen_run(tmp_path)
+    selected = pd.read_csv(run / "selected_tickers.csv")
+    selected["reference_price_local"] = selected["reference_price_local"].astype(object)
+    selected.loc[0, "reference_price_local"] = (
+        "Date\n"
+        "2023-06-12 NaN\n"
+        "2026-06-23 1988.660034\n"
+        "Name: SNDK, Length: 788, dtype: float64"
+    )
+    selected.to_csv(run / "selected_tickers.csv", index=False)
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Invalid reference_price_local for US0.\n"
+            "Expected one numeric latest price from Live Screener.\n"
+            "Re-run the Live Screener with a valid price output."
+        ),
+    ):
+        planner.build_buy_order_plan(run, usd_jpy_rate=158.0)
 
 
 def test_audit_artifacts_and_no_execution_integration(tmp_path):

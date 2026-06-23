@@ -129,6 +129,12 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
         variants=n6_variants,
     )
 
+    stale_stress = pd.read_csv(out / "r100_stress_year_2022.csv")
+    n6_mask = stale_stress["variant"].isin(n6_variants.split(","))
+    stale_stress.loc[n6_mask, ["return_2022", "max_drawdown_2022", "worst_month_2022", "average_active_exposure_2022"]] = 0.0
+    stale_stress.loc[n6_mask, "stress_observation_status"] = "neutral_filled_no_observations"
+    stale_stress.to_csv(out / "r100_stress_year_2022.csv", index=False)
+
     summary = aeb.run_r100_composite_experiment_audit(
         prices=prices,
         us=us,
@@ -156,9 +162,16 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
         "average_active_exposure_2022",
     ]
     assert not stress[stress_metric_columns].isna().any().any()
+    n6_stress = stress[stress["variant"].isin(n6_variants.split(","))]
+    assert set(n6_stress["stress_observation_status"]) == {"observed"}
+    assert not (n6_stress[["return_2022", "max_drawdown_2022", "worst_month_2022", "average_active_exposure_2022"]] == 0.0).all(axis=1).any()
+    assert not final_summary.loc[n6_variants.split(","), "Worst_Month"].isna().any()
 
     composite_overdrive = overdrive[
         overdrive["variant"].isin([v for v in aeb.R100_DEFAULT_VARIANTS if v.endswith("Composite")])
     ]
     assert len(composite_overdrive) == 4
     assert not composite_overdrive["max_drawdown_2022"].isna().any()
+    n6_comp_overdrive = composite_overdrive[composite_overdrive["variant"] == "Residual_100_N6_TTL90_Renew30_Composite"].iloc[0]
+    assert n6_comp_overdrive["stress_observation_status"] == "observed"
+    assert n6_comp_overdrive["max_drawdown_2022"] != 0.0

@@ -1257,8 +1257,10 @@ def _stress_2022(monthly, draw, exposure, renewal, variants):
             rd_dates=pd.to_datetime(renewal["health_check_date"],errors="coerce")
             rd_df=renewal[(renewal.variant.astype(str)==v)&(rd_dates.dt.year==2022)]
         renewed_bool=rd_df.renewed.astype(str).str.lower().isin(["true","1","yes"]) if not rd_df.empty and "renewed" in rd_df else pd.Series(dtype=bool)
-        avg_ex=float(ex_df.active_weight.mean()) if not ex_df.empty and "active_weight" in ex_df else 0.0
-        rows.append({"variant":v,"return_2022":float((1+m22).prod()-1) if len(m22) else 0.0,"max_drawdown_2022":float(d22.min()) if len(d22) else 0.0,"worst_month_2022":float(m22.min()) if len(m22) else 0.0,"monthly_win_rate_2022":float((m22>0).mean()) if len(m22) else 0.0,"average_active_exposure_2022":avg_ex,"renewal_pass_rate_2022":float(renewed_bool.mean()) if len(renewed_bool) else np.nan,"cash_weight_proxy_2022":float(1-avg_ex),"forced_non_renewals_2022":int((~renewed_bool).sum()) if len(renewed_bool) else 0})
+        has_monthly=len(m22)>0; has_drawdown=len(d22)>0; has_exposure=not ex_df.empty and "active_weight" in ex_df and ex_df.active_weight.notna().any()
+        observed=has_monthly or has_drawdown or has_exposure
+        avg_ex=float(ex_df.active_weight.mean()) if has_exposure else 0.0
+        rows.append({"variant":v,"return_2022":float((1+m22).prod()-1) if has_monthly else 0.0,"max_drawdown_2022":float(d22.min()) if has_drawdown else 0.0,"worst_month_2022":float(m22.min()) if has_monthly else 0.0,"monthly_win_rate_2022":float((m22>0).mean()) if has_monthly else 0.0,"average_active_exposure_2022":avg_ex,"stress_observation_status":"observed" if observed else "neutral_filled_no_observations","renewal_pass_rate_2022":float(renewed_bool.mean()) if len(renewed_bool) else np.nan,"cash_weight_proxy_2022":float(1-avg_ex),"forced_non_renewals_2022":int((~renewed_bool).sum()) if len(renewed_bool) else 0})
     out=pd.DataFrame(rows)
     pairs={"Residual_60_N12_TTL90_Renew30_Composite":"Residual_60_N12_TTL90","Residual_65_N12_TTL90_Renew30_Composite":"Residual_65_N12_TTL90"}
     for comp,base in pairs.items():
@@ -1412,12 +1414,14 @@ def _r100_overdrive(summary, cost, exposure, stress, conc):
     for v in [x for x in R100_DEFAULT_VARIANTS if x.endswith('Composite') and x in s.index]:
         net=float(c.loc[v,'Tax_Slippage_Adjusted_CAGR']) if v in c.index and 'Tax_Slippage_Adjusted_CAGR' in c else float(s.loc[v].get('CAGR',np.nan))
         dd=float(s.loc[v].get('Max_Drawdown',np.nan)); avgex=float(ex.loc[v].get('average_active_exposure',np.nan)) if v in ex.index else np.nan
-        stressdd=float(st.loc[v].get('max_drawdown_2022',np.nan)) if v in st.index else np.nan; cr=str(co.loc[v].get('concentration_risk','unknown')) if v in co.index else 'unknown'
+        stress_status=str(st.loc[v].get('stress_observation_status','observed')) if v in st.index else 'missing'
+        raw_stressdd=st.loc[v].get('max_drawdown_2022',np.nan) if v in st.index else np.nan
+        stressdd=np.nan if stress_status=='neutral_filled_no_observations' else float(raw_stressdd) if pd.notna(raw_stressdd) else np.nan; cr=str(co.loc[v].get('concentration_risk','unknown')) if v in co.index else 'unknown'
         if avgex<.60 or dd<-0.60 or stressdd<-0.45 or cr=='extreme': rec='Reject'
         elif (pd.notna(ref_cagr) and net>=ref_cagr and avgex>=.80 and dd>=ref_dd-.10 and cr in ('controlled','moderate')): rec='Standard Candidate'
         elif avgex>=.70 and dd>-0.50 and cr!='extreme': rec='Overdrive Candidate'
         else: rec='Research Only'
-        rows.append({'variant':v,'recommendation':rec,'net_cagr':net,'max_drawdown':dd,'average_active_exposure':avgex,'max_drawdown_2022':stressdd,'concentration_risk':cr,'criteria_note':'Classified using net CAGR, MaxDD, exposure, 2022 stress, concentration, and complexity.'})
+        rows.append({'variant':v,'recommendation':rec,'net_cagr':net,'max_drawdown':dd,'average_active_exposure':avgex,'max_drawdown_2022':stressdd,'concentration_risk':cr,'stress_observation_status':stress_status,'criteria_note':'Classified using net CAGR, MaxDD, exposure, 2022 stress, concentration, and complexity.' + (' Neutral-filled 2022 stress was not treated as observed stress DD.' if stress_status=='neutral_filled_no_observations' else '')})
     return pd.DataFrame(rows)
 
 def write_r100_experiment_report(out, meta, tables):
@@ -1499,9 +1503,16 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
         st_idx=existing_stress.drop_duplicates("variant",keep="last").set_index("variant")
         for name in completed:
             present_cols=[c for c in stress_metric_cols if c in st_idx.columns]
-            if name not in st_idx.index or not present_cols or st_idx.loc[name,present_cols].isna().any(): stress_rehydrate.add(name)
+            status=str(st_idx.loc[name].get("stress_observation_status","")) if name in st_idx.index else ""
+            metrics_missing=name not in st_idx.index or not present_cols or st_idx.loc[name,present_cols].isna().any()
+            neutral_filled=status=="neutral_filled_no_observations" or (name in st_idx.index and present_cols and (_num(st_idx.loc[name,present_cols]).fillna(0)==0).all())
+            if metrics_missing or neutral_filled: stress_rehydrate.add(name)
     elif resume:
         stress_rehydrate=set(completed)
+    if resume and completed:
+        for name in completed:
+            if name not in partial_summary.index or "Worst_Month" not in partial_summary.columns or pd.isna(partial_summary.loc[name,"Worst_Month"]):
+                stress_rehydrate.add(name)
     returns={}; selected_rows=[]; turns=[]; trades=[]; holds=[]; decisions=[]; events=[]; partial_rows=partial_summary.reset_index().to_dict('records') if not partial_summary.empty else []; cost_rows=partial_cost.reset_index().to_dict('records') if not partial_cost.empty else []
     for v in vars_cfg:
         rehydrate_completed=bool(resume and v['name'] in stress_rehydrate)
@@ -1528,7 +1539,7 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
     summary=summary.join(cost,how='left',rsuffix='_cost') if not cost.empty else summary
     pd.DataFrame(partial_rows).drop_duplicates('Variant',keep='last').to_csv(partial,index=False) if partial_rows else None; pd.DataFrame(cost_rows).drop_duplicates('Variant',keep='last').to_csv(costpartial,index=False) if cost_rows else None
     LOG.info("exposure analysis start"); exposure_daily,exposure_summary=_active_exposure(trade_log,selected,start,end); LOG.info("exposure analysis end")
-    renewal_summary,renewal_year,_=_renewal_summaries(renewal_decisions,selected); holding_summary=_holding_summary(holding_periods,selected); LOG.info("stress analysis start"); stress_new=_stress_2022(monthly,draw,exposure_daily,renewal_decisions,selected); stress=_r100_merge_variant_rows(existing_stress,stress_new,selected); LOG.info("stress analysis end"); episodes=_drawdown_episodes(draw,exposure_daily,renewal_decisions,selected); ticker=_ticker_contrib(trade_log,selected); conc_new,split=_concentration_risk(ticker,selected); conc=_r100_merge_variant_rows(existing_conc,conc_new,selected); exposure_summary=_r100_merge_variant_rows(existing_exposure_summary,exposure_summary,selected); future=_future_boundary_review(renewal_decisions,{'monthly_returns.csv':monthly,'annual_returns.csv':annual,'drawdown_series.csv':draw,'renewal_decisions.csv':renewal_decisions}); complexity=pd.DataFrame([{'variant':v,'rule_complexity':'high' if 'Composite' in v else 'low','full_sweep':False,'score_components_full_output':False} for v in selected]); over=_r100_overdrive(summary,cost,exposure_summary,stress,conc)
+    renewal_summary,renewal_year,_=_renewal_summaries(renewal_decisions,selected); holding_summary=_holding_summary(holding_periods,selected); LOG.info("stress analysis start"); stress_variants=list(returns.keys()) if resume else selected; stress_new=_stress_2022(monthly,draw,exposure_daily,renewal_decisions,stress_variants) if stress_variants else pd.DataFrame(); stress=_r100_merge_variant_rows(existing_stress,stress_new,selected); LOG.info("stress analysis end"); episodes=_drawdown_episodes(draw,exposure_daily,renewal_decisions,selected); ticker=_ticker_contrib(trade_log,selected); conc_new,split=_concentration_risk(ticker,selected); conc=_r100_merge_variant_rows(existing_conc,conc_new,selected); exposure_summary=_r100_merge_variant_rows(existing_exposure_summary,exposure_summary,selected); future=_future_boundary_review(renewal_decisions,{'monthly_returns.csv':monthly,'annual_returns.csv':annual,'drawdown_series.csv':draw,'renewal_decisions.csv':renewal_decisions}); complexity=pd.DataFrame([{'variant':v,'rule_complexity':'high' if 'Composite' in v else 'low','full_sweep':False,'score_components_full_output':False} for v in selected]); over=_r100_overdrive(summary,cost,exposure_summary,stress,conc)
     refs=[]
     if source_dir and Path(source_dir).exists():
         for name in ('forensics_summary.csv','candidate_comparison.csv','variant_summary.csv','cost_adjusted_summary.csv'):

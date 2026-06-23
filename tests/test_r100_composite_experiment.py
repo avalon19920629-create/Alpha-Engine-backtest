@@ -175,3 +175,93 @@ def test_r100_resume_rehydrates_completed_variants_into_final_outputs(tmp_path):
     n6_comp_overdrive = composite_overdrive[composite_overdrive["variant"] == "Residual_100_N6_TTL90_Renew30_Composite"].iloc[0]
     assert n6_comp_overdrive["stress_observation_status"] == "observed"
     assert n6_comp_overdrive["max_drawdown_2022"] != 0.0
+
+
+def test_r100_frozen_cache_resume_rehydrates_n6_outputs(tmp_path):
+    prices = aeb.demo_prices()
+    us = [f"US{i}" for i in range(8)]
+    jp = [f"JP{i}.T" for i in range(8)]
+    out = tmp_path / "r100_frozen_resume"
+    cache = tmp_path / "frozen_cache"
+    cache.mkdir()
+    start = "2018-01-01"
+    frozen_end = "2022-12-30"
+    requested_end = "2023-01-31"
+    n6_variants = "Residual_100_N6_TTL90,Residual_100_N6_TTL90_Renew30_Composite"
+    modes = aeb.build_benchmark_modes()
+    bench_tickers = sorted({x for mode in modes.values() for vals in mode.values() for x in vals})
+    requested = [*us, *jp]
+    frozen_prices = prices.loc[:frozen_end]
+    frozen_prices[[c for c in requested if c in frozen_prices.columns]].to_pickle(cache / "prices.pkl")
+    frozen_prices[[c for c in bench_tickers if c in frozen_prices.columns]].to_pickle(cache / "benchmarks.pkl")
+    (cache / "cache_metadata.json").write_text(
+        json.dumps(aeb._cache_metadata(start, frozen_end, requested, bench_tickers), indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="cache miss"):
+        aeb.run_r100_composite_experiment_audit(
+            prices=None,
+            us=us,
+            jp=jp,
+            start=start,
+            end=requested_end,
+            output_dir=out,
+            cache_dir=cache,
+            source_dir=tmp_path / "missing_source",
+            variants=n6_variants,
+        )
+
+    aeb.run_r100_composite_experiment_audit(
+        prices=None,
+        us=us,
+        jp=jp,
+        start=start,
+        end=requested_end,
+        output_dir=out,
+        cache_dir=cache,
+        source_dir=tmp_path / "missing_source",
+        variants=n6_variants,
+        allow_frozen_cache=True,
+    )
+
+    stale_stress = pd.read_csv(out / "r100_stress_year_2022.csv")
+    stale_stress.loc[
+        stale_stress["variant"] == "Residual_100_N6_TTL90_Renew30_Composite",
+        ["return_2022", "max_drawdown_2022", "worst_month_2022", "average_active_exposure_2022"],
+    ] = 0.0
+    stale_stress.loc[
+        stale_stress["variant"] == "Residual_100_N6_TTL90_Renew30_Composite",
+        "stress_observation_status",
+    ] = "neutral_filled_no_observations"
+    stale_stress.to_csv(out / "r100_stress_year_2022.csv", index=False)
+    partial = pd.read_csv(out / "variant_summary_partial.csv")
+    partial.loc[partial["Variant"] == "Residual_100_N6_TTL90_Renew30_Composite", "Worst_Month"] = pd.NA
+    partial.to_csv(out / "variant_summary_partial.csv", index=False)
+
+    aeb.run_r100_composite_experiment_audit(
+        prices=None,
+        us=us,
+        jp=jp,
+        start=start,
+        end=requested_end,
+        output_dir=out,
+        cache_dir=cache,
+        source_dir=tmp_path / "missing_source",
+        variants=n6_variants,
+        resume=True,
+        allow_frozen_cache=True,
+    )
+
+    meta = json.loads((out / "audit_metadata.json").read_text())
+    assert meta["frozen_cache_used"] is True
+    assert meta["frozen_cache_end"] == frozen_end
+    assert meta["reproducibility_mode"] is True
+    assert meta["note"] == aeb.FROZEN_CACHE_REPRO_NOTE
+
+    final_summary = pd.read_csv(out / "r100_variant_summary.csv", index_col=0)
+    stress = pd.read_csv(out / "r100_stress_year_2022.csv").set_index("variant")
+    composite = "Residual_100_N6_TTL90_Renew30_Composite"
+    assert stress.loc[composite, "stress_observation_status"] == "observed"
+    assert stress.loc[composite, "max_drawdown_2022"] != 0.0
+    assert not pd.isna(final_summary.loc[composite, "Worst_Month"])

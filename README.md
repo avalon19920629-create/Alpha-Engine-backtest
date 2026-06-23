@@ -213,3 +213,73 @@ python alpha_engine_order_planner.py \
 - 監査目的でのみ `--rounding-mode floor` または `--no-min-one-unit-per-selected` を使い、0株銘柄の警告を確認する。
 
 `buy_order_plan.csv`、`buy_order_summary.csv`、`buy_order_report.md` には、単純切り捨て数量、最適化後数量、実効Weight、Weight乖離、未投資資金、最適化ステップ数、残余現金警告が出力されます。発注直前には証券会社画面で最新価格、注文単位、手数料、税金、為替、必要資金を必ず再確認してください。
+
+## Alpha Engine Live TTL Manager
+
+`alpha_engine_ttl_manager.py` は、実際に約定した保有銘柄だけを対象に TTL90 / Renew30 / Composite 判定を行う実運用補助ツールです。自動売買システムではなく、証券会社 API、口座連携、自動発注、注文送信は実装していません。TTL Manager は過去の `buy_order_plan.csv` を唯一の事実源にせず、ユーザーが証券会社画面で確認した `live_holdings_ledger.csv` を唯一の事実源として扱います。
+
+### 1. 初回保有台帳作成
+
+まず Order Planner の注文案から、実約定入力用テンプレートだけを作成します。この段階では `planned_shares` を実保有数量として採用しません。
+
+```bash
+python alpha_engine_ttl_manager.py \
+  --create-fill-template \
+  --order-plan-dir "/path/to/order_plan_run" \
+  --output-root "artifacts/ttl_manager_runs"
+```
+
+生成された `actual_fills_template.csv` に、ユーザーが証券会社の約定画面で確認した `actual_shares`、`actual_entry_date`、`actual_entry_price_local` を入力します。入力済みファイルから初期台帳を作成します。
+
+```bash
+python alpha_engine_ttl_manager.py \
+  --initialize-ledger \
+  --actual-fills "/path/to/actual_fills_confirmed.csv" \
+  --ledger-path "/path/to/live_holdings_ledger.csv"
+```
+
+`actual_shares`、`actual_entry_date`、`actual_entry_price_local` が欠損している場合、TTL Manager は安全停止します。注文案だけから実保有台帳を無言で確定することはありません。
+
+### 2. Day90 TTL 判定
+
+通常の TTL 判定は次のように実行します。
+
+```bash
+python alpha_engine_ttl_manager.py \
+  --ledger-path "/path/to/live_holdings_ledger.csv" \
+  --output-root "artifacts/ttl_manager_runs"
+```
+
+デフォルトは `TTL_DAYS=90`、`RENEWAL_DAYS=30`、`WEEKLY_REVIEW_DAY=FRI`、`DATA_LOOKBACK_MONTHS=18` です。Day89 以前の `ACTIVE` 銘柄には売却・延命判定を出さず、Day90 到達銘柄だけ既存監査済みロジックに基づく Composite 判定を行います。Composite は既存バックテスト実装の Rank Buffer、Residual、50DMA 条件を再利用し、3 条件中 2 条件以上を合格とします。
+
+Composite 合格時は `RENEWED` として最大 30 日延命し、売却注文案は出しません。Composite 不合格時は `SELL_PENDING` として `sell_order_plan.csv` に手動売却注文案を出力します。売却した銘柄は即時補充せず、現金化して次回再選定まで空席を維持します。
+
+### 3. 延命中の週次判定
+
+`RENEWED` 銘柄は Day91–Day120 の延命期間中、原則として毎週金曜日の各市場終値確定後に TTL Manager を再実行して監視します。出力には `decision_as_of_date`、`decision_market` 相当の市場注記、`sell_not_before_date` が含まれます。延命中に Composite 失格となった場合は `RENEWAL_FAILED_SELL_PENDING` とし、手動売却注文案を出します。ただし自動発注は行わず、同じ終値で売れたものとして扱いません。
+
+### 4. Day120 再選定
+
+Day120 到達時は二度目の Renew30 を認めず、`RECONSTITUTION_REQUIRED` を出力します。新しい上位 N 銘柄への再選定と注文計画は TTL Manager では行わず、既存の Live Screener と Order Planner を使います。
+
+```bash
+python alpha_engine_live_screener.py --output-root artifacts/live_screening_runs
+python alpha_engine_order_planner.py --help
+```
+
+旧保有銘柄が新しい上位 N に再び含まれる場合は、新サイクルで再選定されたものとして扱います。不必要な売却→再購入は強制しませんが、連続 Renew30 としては記録しません。
+
+### 5. 実約定後の台帳更新
+
+TTL Manager は初期状態では `live_holdings_ledger.csv` を上書きせず、`live_holdings_ledger_proposed.csv` だけを出力します。売却・買付が実際に完了した後、ユーザーが約定内容を確認したファイルを用意してから明示的に更新してください。
+
+```bash
+python alpha_engine_ttl_manager.py \
+  --apply-execution-confirmation \
+  --ledger-path "/path/to/live_holdings_ledger.csv" \
+  --execution-confirmation "/path/to/execution_confirmation.csv"
+```
+
+安全のため、売却未約定・一部約定・注文取消がある場合に TTL Manager が実保有数量を勝手に 0 にすることはありません。実運用では必ず証券会社画面で株数、価格、約定状況を確認してから台帳へ反映してください。
+
+各実行は日時付きフォルダに `ttl_review_decisions.csv`、`renewal_decisions.csv`、`sell_order_plan.csv`、`reconstitution_required.csv`、`live_holdings_ledger_proposed.csv`、`data_quality.csv`、`download_failures.csv`、`metadata.json`、`ttl_review_report.md` を保存します。データ不足、ベンチマーク取得不能、JP ベンチマークの無言代替が必要になる状況、Composite 構成要素の計算不能、未来日付、不正な台帳、既に売却待ちの銘柄の二重売却処理は `DATA_BLOCKED — no trading recommendation generated.` として安全停止します。

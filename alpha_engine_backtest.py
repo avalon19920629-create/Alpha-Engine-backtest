@@ -1077,16 +1077,50 @@ def _cost_adjusted_returns(r,turnover,tax_rate=0.20315,slippage_bps=10):
         if d in rr.index: rr.loc[d]-=tc
     return rr,slip,tax
 
-def _load_ttl_cache(candidates,start,end,requested,bench_tickers):
+FROZEN_CACHE_REPRO_NOTE="historical artifacts were regenerated from a frozen price snapshot; no live download was performed"
+
+
+def _cache_frame_covers(df,start,end):
+    if df is None or df.empty: return False
+    idx=pd.to_datetime(df.index)
+    return idx.min()<=pd.Timestamp(start) and idx.max()>=pd.Timestamp(end)
+
+
+def validate_frozen_price_cache(cache_dir,start,requested_end,requested,benchmark_tickers):
+    cache_dir=Path(cache_dir); meta_path=cache_dir/"cache_metadata.json"; prices_path=cache_dir/"prices.pkl"; bench_path=cache_dir/"benchmarks.pkl"
+    if not (meta_path.exists() and prices_path.exists() and bench_path.exists()): return False,"missing_cache_files",{}
+    try:
+        import json
+        meta=json.loads(meta_path.read_text(encoding="utf-8"))
+        frozen_end=meta.get("end")
+        if meta.get("start")!=str(start): return False,"cache_period_mismatch",meta
+        if not frozen_end or pd.Timestamp(frozen_end)>pd.Timestamp(requested_end): return False,"cache_period_mismatch",meta
+        if set(meta.get("requested_tickers",[]))!=set(requested): return False,"cache_universe_mismatch",meta
+        if set(meta.get("benchmark_tickers",[]))!=set(benchmark_tickers): return False,"cache_benchmark_mismatch",meta
+        prices=pd.read_pickle(prices_path); bench=pd.read_pickle(bench_path)
+        if not _cache_frame_covers(prices,start,frozen_end): return False,"frozen_prices_coverage_mismatch",meta
+        if not _cache_frame_covers(bench,start,frozen_end): return False,"frozen_benchmarks_coverage_mismatch",meta
+        return True,"ok",meta
+    except Exception as exc:
+        return False,f"cache_corrupt: {exc}",{}
+
+
+def _load_ttl_cache(candidates,start,end,requested,bench_tickers,allow_frozen_cache=False):
     for source in candidates:
         if not source: continue
         p=Path(source)
         if not p.exists(): continue
         ok,reason=validate_price_cache(p,start,end,requested,bench_tickers)
         if ok:
-            prices,bench=load_price_cache(p); return pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(), {"cache_used":True,"cache_source":str(p),"cache_status":"hit","prices_cache_found":(p/"prices.pkl").exists(),"benchmarks_cache_found":(p/"benchmarks.pkl").exists(),"cache_loaded_at":pd.Timestamp.now("UTC").isoformat()}
+            prices,bench=load_price_cache(p); return pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(), {"cache_used":True,"cache_source":str(p),"cache_status":"hit","prices_cache_found":(p/"prices.pkl").exists(),"benchmarks_cache_found":(p/"benchmarks.pkl").exists(),"cache_loaded_at":pd.Timestamp.now("UTC").isoformat(),"reproducibility_mode":False,"frozen_cache_used":False}
+        if allow_frozen_cache and reason=="cache_period_mismatch":
+            frozen_ok,frozen_reason,frozen_meta=validate_frozen_price_cache(p,start,end,requested,bench_tickers)
+            if frozen_ok:
+                prices,bench=load_price_cache(p); frozen_end=str(frozen_meta.get("end"))
+                return pd.concat([prices,bench],axis=1).loc[:,lambda x:~x.columns.duplicated()].sort_index(), {"cache_used":True,"cache_source":str(p),"cache_status":"frozen_hit","prices_cache_found":True,"benchmarks_cache_found":True,"cache_loaded_at":pd.Timestamp.now("UTC").isoformat(),"reproducibility_mode":True,"frozen_cache_used":True,"frozen_cache_end":frozen_end,"requested_end":str(end),"note":FROZEN_CACHE_REPRO_NOTE}
+            reason=frozen_reason
         LOG.warning("ttl_renewal cache fallback from %s: %s",p,reason)
-    return None,{"cache_used":False,"cache_source":"","cache_status":"miss","prices_cache_found":False,"benchmarks_cache_found":False,"cache_loaded_at":""}
+    return None,{"cache_used":False,"cache_source":"","cache_status":"miss","prices_cache_found":False,"benchmarks_cache_found":False,"cache_loaded_at":"","reproducibility_mode":bool(allow_frozen_cache),"frozen_cache_used":False}
 
 def run_ttl_renewal_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/ttl_renewal",downloader=None,quick=False,cache_dir=None,force_refresh_cache=False,resume=False,tax_rate=0.20315,slippage_bps=10,full_score_output=False):
     import json, time
@@ -1472,16 +1506,18 @@ def _r100_merge_variant_rows(old, new, selected, variant_col='variant'):
         out=out.drop_duplicates(variant_col,keep='last').sort_values('_r100_order').drop(columns='_r100_order')
     return out
 
-def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/r100_composite_experiment",source_dir="artifacts/ttl_composite_forensics",cache_dir=None,resume=False,variants=None,only_variant=None,quick=False,force_refresh_cache=False,tax_rate=0.20315,slippage_bps=10,no_detail_logs=True):
+def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-01-01",end=None,output_dir="artifacts/r100_composite_experiment",source_dir="artifacts/ttl_composite_forensics",cache_dir=None,resume=False,variants=None,only_variant=None,quick=False,force_refresh_cache=False,tax_rate=0.20315,slippage_bps=10,no_detail_logs=True,allow_frozen_cache=False):
     t0=time.time(); end=end or pd.Timestamp.today().date().isoformat(); out=Path(output_dir); out.mkdir(parents=True,exist_ok=True); (out/"cache").mkdir(exist_ok=True); Path("reports").mkdir(exist_ok=True); reset_insufficient_history_warnings(); LOG.info("audit start: r100_composite_experiment")
     if us is None or jp is None: us,jp=get_live_universe()
     us=[normalize_yfinance_ticker(t) for t in us]; jp=[normalize_yfinance_ticker(t) for t in jp]; modes=build_benchmark_modes(); default_mode=modes["broad_default"]; bench_tickers=sorted({x for mode in modes.values() for vals in mode.values() for x in vals}); requested=list(dict.fromkeys([*us,*jp])); vars_cfg=build_r100_composite_variants(variants,only_variant); selected=[v['name'] for v in vars_cfg]; LOG.info("selected variants: %s",selected)
     failures=pd.DataFrame(columns=["ticker","reason"]); cache_meta={"cache_used":prices is not None,"cache_source":"provided_prices" if prices is not None else ""}
     if prices is None:
         LOG.info("cache loading start")
-        prices,cache_meta=_load_ttl_cache(_r100_cache_candidates(cache_dir,out,source_dir),start,end,requested,bench_tickers)
+        prices,cache_meta=_load_ttl_cache(_r100_cache_candidates(cache_dir,out,source_dir),start,end,requested,bench_tickers,allow_frozen_cache=allow_frozen_cache)
         if prices is None and not force_refresh_cache: raise SystemExit("r100_composite_experiment cache miss: default download is disabled; pass --force-refresh-cache to download")
         if prices is None: prices,failures,requested,cache_meta=build_price_cache(requested,bench_tickers,start,end,out/"cache",downloader=None)
+        if cache_meta.get("frozen_cache_used"):
+            end=cache_meta.get("frozen_cache_end",end)
         LOG.info("cache loading end: %s",cache_meta.get("cache_source"))
     dq,_,_,usable=build_live_data_quality_report(prices,requested,us,jp,failures,start,end); us_usable=[t for t in us if t in usable]; jp_usable=[t for t in jp if t in usable]
     completed=set(); cp=out/"completed_variants.csv"; partial=out/"variant_summary_partial.csv"; costpartial=out/"cost_adjusted_summary_partial.csv"
@@ -1547,7 +1583,7 @@ def run_r100_composite_experiment_audit(prices=None,us=None,jp=None,start="2015-
             if not f.empty: refs.append(f.reset_index().rename(columns={'index':'variant'}))
     candidate=pd.concat([summary.reset_index().rename(columns={'Variant':'variant'}),*refs],ignore_index=True,sort=False) if refs else summary.reset_index().rename(columns={'Variant':'variant'})
     cash=exposure_summary[['variant','average_active_exposure','average_cash_weight','exposure_judgment']].copy() if not exposure_summary.empty else pd.DataFrame(); event_summary=ttl_event_log.groupby(['variant','event']).size().reset_index(name='count') if not ttl_event_log.empty else pd.DataFrame()
-    meta={'audit_name':'r100_composite_experiment','selected_variants':selected,'reference_variants':list(R100_REFERENCE_VARIANTS),'default_download_allowed':False,'default_full_variant_recalculation_allowed':False,'score_components_full_output':False,'cache_first_candidates':[str(x) for x in _r100_cache_candidates(cache_dir,out,source_dir) if x],'cache_used':cache_meta.get('cache_used',False),'cache_source':cache_meta.get('cache_source',''),'resume':resume,'tax_rate':tax_rate,'slippage_bps':slippage_bps,'output_files':R100_OUTPUT_FILES,'wall_time_seconds':round(time.time()-t0,2)}
+    meta={'audit_name':'r100_composite_experiment','selected_variants':selected,'reference_variants':list(R100_REFERENCE_VARIANTS),'default_download_allowed':False,'default_full_variant_recalculation_allowed':False,'score_components_full_output':False,'cache_first_candidates':[str(x) for x in _r100_cache_candidates(cache_dir,out,source_dir) if x],'cache_used':cache_meta.get('cache_used',False),'cache_source':cache_meta.get('cache_source',''),'frozen_cache_used':cache_meta.get('frozen_cache_used',False),'frozen_cache_end':cache_meta.get('frozen_cache_end',''),'reproducibility_mode':cache_meta.get('reproducibility_mode',False),'note':cache_meta.get('note',''),'resume':resume,'tax_rate':tax_rate,'slippage_bps':slippage_bps,'output_files':R100_OUTPUT_FILES,'wall_time_seconds':round(time.time()-t0,2)}
     LOG.info("report writing start")
     for name,df,idx in (("r100_variant_summary.csv",summary,True),("r100_cost_adjusted_summary.csv",cost,True),("r100_candidate_comparison.csv",candidate,False),("r100_complexity_scorecard.csv",complexity,False),("r100_overdrive_recommendation.csv",over,False),("r100_active_exposure_daily.csv",exposure_daily,False),("r100_active_exposure_summary.csv",exposure_summary,False),("r100_cash_drag_proxy.csv",cash,False),("r100_drawdown_episodes.csv",episodes,False),("r100_stress_year_2022.csv",stress,False),("r100_renewal_decisions.csv",renewal_decisions,False),("r100_renewal_condition_summary.csv",renewal_summary,False),("r100_renewal_decision_by_year.csv",renewal_year,False),("r100_holding_period_summary.csv",holding_summary,False),("r100_ticker_contribution_summary.csv",ticker,False),("r100_concentration_risk_summary.csv",conc,False),("r100_us_jp_split_summary.csv",split,False),("r100_event_log_summary.csv",event_summary,False),("future_data_boundary_review.csv",future,False)): _write_df(df,out/name,index=idx)
     summary.to_json(out/"r100_variant_summary.json",orient='index',indent=2); (out/"audit_metadata.json").write_text(json.dumps(meta,indent=2,default=str),encoding='utf-8')
@@ -1779,14 +1815,14 @@ def write_outputs(out, strategies, selected, turnover, benchmarks=None):
     return summary,verdict
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--source-dir",default="artifacts/ttl_renewal_quick"); ap.add_argument("--rerun-selected",action="store_true"); ap.add_argument("--variants"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--only-variant"); ap.add_argument("--no-detail-logs",action="store_true",default=True); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal","ttl_composite_forensics","r100_composite_experiment"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
+    ap=argparse.ArgumentParser(); ap.add_argument("--start",default="2015-01-01"); ap.add_argument("--end",default=pd.Timestamp.today().date().isoformat()); ap.add_argument("--rebalance",default="quarterly",choices=["quarterly"]); ap.add_argument("--output-dir",default="artifacts"); ap.add_argument("--demo",action="store_true"); ap.add_argument("--quick",action="store_true",help="Run quick mode for supported audits"); ap.add_argument("--cache-dir"); ap.add_argument("--source-dir",default="artifacts/ttl_renewal_quick"); ap.add_argument("--rerun-selected",action="store_true"); ap.add_argument("--variants"); ap.add_argument("--force-refresh-cache",action="store_true"); ap.add_argument("--allow-frozen-cache",action="store_true",help="R100 only: reproduce from a cache whose metadata end predates the requested end"); ap.add_argument("--resume",action="store_true"); ap.add_argument("--tax-rate",type=float,default=0.20315); ap.add_argument("--slippage-bps",type=float,default=10); ap.add_argument("--full-score-output",action="store_true"); ap.add_argument("--only-variant"); ap.add_argument("--no-detail-logs",action="store_true",default=True); ap.add_argument("--audit",choices=["minervini_lens","residual_momentum_deep","residual_live_validation","residual_full_sweep","residual_concentration","ttl_renewal","ttl_composite_forensics","r100_composite_experiment"]); args=ap.parse_args(); logging.basicConfig(level=logging.INFO)
     if args.demo: p=demo_prices(); us=[f"US{i}" for i in range(8)]; jp=[f"JP{i}.T" for i in range(8)]
     else:
         if args.audit=="ttl_composite_forensics":
             summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
         us,jp=get_live_universe()
         if args.audit=="r100_composite_experiment":
-            summary=run_r100_composite_experiment_audit(None,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
+            summary=run_r100_composite_experiment_audit(None,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs,args.allow_frozen_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
         if args.audit=="ttl_renewal":
             summary=run_ttl_renewal_audit(None,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
         if args.audit=="residual_concentration":
@@ -1800,7 +1836,7 @@ def main():
     if args.audit=="ttl_composite_forensics":
         summary=run_ttl_composite_forensics_audit(args.source_dir,args.output_dir,args.cache_dir,args.rerun_selected,args.variants,args.quick,args.force_refresh_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string(index=False) if hasattr(summary,"to_string") else summary); return
     if args.audit=="r100_composite_experiment":
-        summary=run_r100_composite_experiment_audit(p,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
+        summary=run_r100_composite_experiment_audit(p,us,jp,args.start,args.end,args.output_dir,args.source_dir,args.cache_dir,args.resume,args.variants,args.only_variant,args.quick,args.force_refresh_cache,args.tax_rate,args.slippage_bps,args.no_detail_logs,args.allow_frozen_cache); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary.to_string()); return
     if args.audit=="ttl_renewal":
         summary=run_ttl_renewal_audit(p,us,jp,args.start,args.end,args.output_dir,quick=args.quick,cache_dir=args.cache_dir,force_refresh_cache=args.force_refresh_cache,resume=args.resume,tax_rate=args.tax_rate,slippage_bps=args.slippage_bps,full_score_output=args.full_score_output); print(f"Output directory: {Path(args.output_dir).resolve()}"); print(summary[[c for c in ["CAGR","Annualized_Volatility","Max_Drawdown","Sharpe","Calmar","Turnover"] if c in summary.columns]].to_string()); return
     if args.audit=="residual_concentration":

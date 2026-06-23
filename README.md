@@ -72,3 +72,50 @@ python core_alpha_integration_backtest.py --start 2015-01-01 --end 2026-06-15 --
 
 ### 評価期間とメトリクス計算
 価格取得はAlphaスコア計算とリバランス準備のため `--start` より前のwarmup期間を含みますが、CAGR、MaxDD、Sharpe、Calmar、Total_Returnなどの成績指標は `--start` 以降、`--end` 以前の評価期間リターンのみで計算します。CAGRの年数分母にwarmup期間は含めず、Equity Curveも評価開始時点でリセットします。本バックテストは戦略検証・コード品質確認を目的とし、投資助言ではありません。
+
+## Colab Production Gearbox
+
+`alpha_engine_production.py` is the Colab-oriented production entry point for running one Alpha Engine body with a profile switch instead of separate ROBUST/FERRARI code paths. Defaults are intentionally conservative: `ENGINE_PROFILE="ROBUST"`, TTL=90 days, Renew=30 days, and Composite health checks.
+
+### Minimal Colab cells
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+```bash
+%cd /content/drive/MyDrive
+!git clone https://github.com/<your-org>/Alpha-Engine-backtest.git || true
+%cd Alpha-Engine-backtest
+!git pull --ff-only
+!python -m pip install -r requirements.txt
+```
+
+```python
+# Profile setting: ROBUST is the default standard machine.
+ENGINE_PROFILE = "ROBUST"      # "ROBUST" / "FERRARI" / "CUSTOM"
+ALLOW_OVERDRIVE = False         # FERRARI requires True explicitly.
+ALLOW_CUSTOM_PROFILE = False    # CUSTOM requires True explicitly.
+```
+
+```bash
+!python alpha_engine_production.py --profile ROBUST --output-root /content/drive/MyDrive/alpha_engine_runs
+# Overdrive/satellite only, not the standard machine:
+# !python alpha_engine_production.py --profile FERRARI --allow-overdrive --output-root /content/drive/MyDrive/alpha_engine_runs
+# Research-only custom profile:
+# !python alpha_engine_production.py --profile CUSTOM --allow-custom-profile --custom-residual-ratio 60 --custom-portfolio-n 12 --output-root /content/drive/MyDrive/alpha_engine_runs
+```
+
+```bash
+!find /content/drive/MyDrive/alpha_engine_runs -maxdepth 2 -name metadata.json -o -name run_report.md
+```
+
+```python
+from pathlib import Path
+latest = sorted(Path('/content/drive/MyDrive/alpha_engine_runs').glob('*'))[-1]
+print(latest)
+print((latest / 'run_report.md').read_text()[:4000])
+```
+
+Each run writes a timestamped folder containing `metadata.json`, `run_report.md`, selected tickers, adopted weights, renewal decisions, sell/extend/cash reasons, Git commit hash, data timestamps, and a copied or explicitly referenced price cache with `cache_metadata.json` when live data is used. FERRARI emits an explicit warning in console output and in the report because it is `overdrive_satellite_alpha`, not the ROBUST standard profile.

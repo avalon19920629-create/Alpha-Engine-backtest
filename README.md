@@ -119,3 +119,61 @@ print((latest / 'run_report.md').read_text()[:4000])
 ```
 
 Each run writes a timestamped folder containing `metadata.json`, `run_report.md`, selected tickers, adopted weights, renewal decisions, sell/extend/cash reasons, Git commit hash, data timestamps, and a copied or explicitly referenced price cache with `cache_metadata.json` when live data is used. FERRARI emits an explicit warning in console output and in the report because it is `overdrive_satellite_alpha`, not the ROBUST standard profile.
+
+## Lightweight Live Screener（Residual Momentum）
+
+`alpha_engine_live_screener.py` は、バックテストを再実行せず、直近約18か月の市場データだけで現在のResidual Momentumランキングを作成する実運用確認用の軽量スクリーナーです。TTL90 / Renew30、過去売買履歴、CAGR、Sharpe、MDD、年次成績、自動発注は実装していません。
+
+### Colab 最小手順
+
+1. Google Driveをmountします。
+
+```python
+from google.colab import drive
+drive.mount('/content/drive')
+```
+
+2. repositoryをcloneまたはpullします。
+
+```bash
+%cd /content/drive/MyDrive
+!git clone https://github.com/<your-org>/Alpha-Engine-backtest.git || true
+%cd Alpha-Engine-backtest
+!git pull --ff-only
+```
+
+3. dependenciesをinstallします。
+
+```bash
+!python -m pip install -r requirements.txt
+```
+
+4. `RESIDUAL_RATIO` と `TOTAL_HOLDINGS` を設定します。標準は Residual 60% / N12（US6・JP6）、フェラーリ設定は Residual 100% / N6（US3・JP3）です。
+
+```python
+RESIDUAL_RATIO = 60
+TOTAL_HOLDINGS = 12
+# Ferrari / satellite setting:
+# RESIDUAL_RATIO = 100
+# TOTAL_HOLDINGS = 6
+```
+
+5. Live Screenerを実行します。
+
+```bash
+!python alpha_engine_live_screener.py \
+  --residual-ratio 60 \
+  --total-holdings 12 \
+  --output-root /content/drive/MyDrive/alpha_engine/live_screening_runs
+```
+
+6. `screen_report.md` と `selected_tickers.csv` を確認します。
+
+```python
+from pathlib import Path
+latest = sorted(Path('/content/drive/MyDrive/alpha_engine/live_screening_runs').glob('*'))[-1]
+print(latest)
+print((latest / 'screen_report.md').read_text()[:4000])
+```
+
+各実行は日時付きフォルダに `ranked_candidates_us.csv`、`ranked_candidates_jp.csv`、`selected_tickers.csv`、`adopted_weights.csv`、`score_components.csv`、`data_quality.csv`、`download_failures.csv`、`metadata.json`、`screen_report.md` を保存します。日本株Residualのベンチマーク取得状態は `metadata.json` と `screen_report.md` に明示され、JPベンチマークが取得不能な場合は無言で代替せず停止します。

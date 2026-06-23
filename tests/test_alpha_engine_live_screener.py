@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 import alpha_engine_live_screener as live
+import alpha_engine_order_planner as planner
 
 
 def _prices():
@@ -56,6 +57,61 @@ def test_selected_weights_sum_to_one(tmp_path):
     out = _run(tmp_path, 60, 12)
     weights = pd.read_csv(out / "adopted_weights.csv")
     assert weights["Weight"].sum() == pytest.approx(1.0)
+
+
+def test_reference_prices_are_numeric_scalars_and_dates(tmp_path):
+    out = _run(tmp_path, 60, 12)
+    selected = pd.read_csv(out / "selected_tickers.csv")
+    report = (out / "screen_report.md").read_text()
+    assert "reference_price_date" in selected.columns
+    assert pd.api.types.is_numeric_dtype(selected["reference_price_local"])
+    assert selected["reference_price_local"].notna().all()
+    assert (selected["reference_price_local"] > 0).all()
+    assert selected["reference_price_local"].map(np.isscalar).all()
+    assert "last valid closing price (`reference_price_local`)" in report
+
+
+def test_order_planner_accepts_live_screener_run_and_generates_costs(tmp_path):
+    screen_out = _run(tmp_path / "screen", 60, 12)
+    plan_out = planner.build_buy_order_plan(
+        screen_out, total_capital_jpy=3_000_000, usd_jpy_rate=158.0,
+        cash_buffer_pct=0.01, price_buffer_pct=0.02, us_order_unit=1, jp_order_unit=1,
+    )
+    plan = pd.read_csv(plan_out / "buy_order_plan.csv")
+    summary = pd.read_csv(plan_out / "buy_order_summary.csv").iloc[0]
+    assert (plan["action"] == "BUY").all()
+    assert (plan["planned_shares"] > 0).all()
+    assert (plan["planned_cost_jpy"] > 0).all()
+    assert summary["planned_total_cost_jpy"] > 0
+    assert summary["residual_cash_jpy"] >= 0
+
+
+def test_reference_price_uses_last_valid_close_when_latest_is_nan(tmp_path):
+    prices = _prices()
+    prices.loc[prices.index[-1], "US0"] = np.nan
+    out = _run(tmp_path, 60, 12, prices=prices)
+    selected = pd.read_csv(out / "selected_tickers.csv")
+    if "US0" in set(selected["ticker"]):
+        row = selected[selected["ticker"] == "US0"].iloc[0]
+        expected = prices["US0"].dropna().iloc[-1]
+        expected_date = prices["US0"].dropna().index[-1].date().isoformat()
+        assert row["reference_price_local"] == pytest.approx(expected)
+        assert row["reference_price_date"] == expected_date
+
+
+def test_reference_price_extractor_handles_yfinance_multiindex_close():
+    idx = pd.bdate_range("2024-01-01", periods=3)
+    prices = pd.DataFrame(
+        {
+            ("Close", "AAA"): [10.0, np.nan, 12.5],
+            ("Open", "AAA"): [9.0, 11.0, 12.0],
+            ("Close", "BBB"): [20.0, 21.0, np.nan],
+        },
+        index=idx,
+    )
+    price, date = live._latest_valid_close_for_ticker(prices, "BBB")
+    assert price == pytest.approx(21.0)
+    assert date == idx[1].date().isoformat()
 
 
 def test_does_not_call_ttl_or_backtest_functions(tmp_path):

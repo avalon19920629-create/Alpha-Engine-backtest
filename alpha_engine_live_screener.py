@@ -129,6 +129,8 @@ def run_live_screening(prices: pd.DataFrame | None = None, us: list[str] | None 
     selected = pd.concat([us_rank[us_rank.adopted], jp_rank[jp_rank.adopted]], ignore_index=True)
     inv = 1 / selected["Volatility"].astype(float)
     selected["Weight"] = inv / inv.sum()
+    latest_prices = alpha.asof_prices(prices, data_end).ffill()
+    selected["reference_price_local"] = [latest_prices.get(t, np.nan) for t in selected["ticker"]]
     weights = selected[["ticker", "region", "Weight", "Volatility", "composite_score", "base_momentum_score", "residual_score", "benchmark"]].copy()
     score_components = pd.concat([us_rank, jp_rank], ignore_index=True)
     quality_rows = []

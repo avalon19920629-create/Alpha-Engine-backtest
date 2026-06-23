@@ -92,3 +92,74 @@ def test_audit_artifacts_and_no_execution_integration(tmp_path):
     source = open("alpha_engine_order_planner.py", encoding="utf-8").read().lower()
     forbidden = ["alpaca", "interactivebrokers", "ib_insync", "kabustation", "place_order", "submit_order"]
     assert not any(term in source for term in forbidden)
+
+
+def _rounding_screen_run(tmp_path):
+    rows = [
+        {"ticker": "AAA", "region": "JP", "rank_in_region": 1, "Weight": 0.50, "reference_price_local": 5100},
+        {"ticker": "BBB", "region": "JP", "rank_in_region": 2, "Weight": 0.30, "reference_price_local": 2900},
+        {"ticker": "CCC", "region": "JP", "rank_in_region": 3, "Weight": 0.20, "reference_price_local": 1900},
+    ]
+    pd.DataFrame(rows).to_csv(tmp_path / "selected_tickers.csv", index=False)
+    return tmp_path
+
+
+def test_floor_mode_preserves_simple_floor_behavior(tmp_path):
+    out = planner.build_buy_order_plan(
+        _rounding_screen_run(tmp_path), total_capital_jpy=10_000, usd_jpy_rate=158.0,
+        cash_buffer_pct=0, price_buffer_pct=0, rounding_mode="floor",
+    )
+    plan = pd.read_csv(out / "buy_order_plan.csv")
+    summary = pd.read_csv(out / "buy_order_summary.csv").iloc[0]
+    assert plan["planned_shares"].tolist() == plan["floor_planned_shares"].tolist()
+    assert summary["rounding_mode"] == "floor"
+    assert summary["optimization_step_count"] == 0
+
+
+def test_target_tracking_improves_floor_without_exceeding_deployable(tmp_path):
+    out = planner.build_buy_order_plan(
+        _rounding_screen_run(tmp_path), total_capital_jpy=10_000, usd_jpy_rate=158.0,
+        cash_buffer_pct=0, price_buffer_pct=0, rounding_mode="target_tracking",
+        min_one_unit_per_selected=True,
+    )
+    plan = pd.read_csv(out / "buy_order_plan.csv")
+    summary = pd.read_csv(out / "buy_order_summary.csv").iloc[0]
+    assert summary["optimized_total_cost_jpy"] <= summary["deployable_capital_jpy"]
+    assert summary["optimized_weight_tracking_error"] < summary["initial_weight_tracking_error"]
+    assert summary["optimized_residual_cash_jpy"] < summary["deployable_capital_jpy"] - summary["initial_floor_total_cost_jpy"]
+    assert (plan["planned_shares"] >= plan["order_unit"]).all()
+    assert (plan["planned_shares"] % plan["order_unit"] == 0).all()
+
+
+def test_minimum_one_unit_errors_when_budget_is_too_small(tmp_path):
+    with pytest.raises(ValueError, match="Insufficient deployable capital to buy at least one order unit"):
+        planner.build_buy_order_plan(
+            _rounding_screen_run(tmp_path), total_capital_jpy=4_000, usd_jpy_rate=158.0,
+            cash_buffer_pct=0, price_buffer_pct=0, rounding_mode="target_tracking",
+            min_one_unit_per_selected=True,
+        )
+
+
+def test_target_tracking_is_deterministic(tmp_path):
+    run = _rounding_screen_run(tmp_path)
+    out1 = tmp_path / "out1"
+    out2 = tmp_path / "out2"
+    kwargs = dict(
+        screen_run_dir=run, total_capital_jpy=10_000, usd_jpy_rate=158.0,
+        cash_buffer_pct=0, price_buffer_pct=0, rounding_mode="target_tracking",
+        min_one_unit_per_selected=True,
+    )
+    planner.build_buy_order_plan(output_dir=out1, **kwargs)
+    planner.build_buy_order_plan(output_dir=out2, **kwargs)
+    pd.testing.assert_frame_equal(
+        pd.read_csv(out1 / "buy_order_plan.csv"),
+        pd.read_csv(out2 / "buy_order_plan.csv"),
+    )
+
+
+def test_live_screener_selection_columns_are_not_rewritten(tmp_path):
+    run = _rounding_screen_run(tmp_path)
+    before = pd.read_csv(run / "selected_tickers.csv")
+    planner.build_buy_order_plan(run, total_capital_jpy=10_000, usd_jpy_rate=158.0, cash_buffer_pct=0, price_buffer_pct=0)
+    after = pd.read_csv(run / "selected_tickers.csv")
+    pd.testing.assert_frame_equal(before, after)

@@ -177,3 +177,39 @@ print((latest / 'screen_report.md').read_text()[:4000])
 ```
 
 各実行は日時付きフォルダに `ranked_candidates_us.csv`、`ranked_candidates_jp.csv`、`selected_tickers.csv`、`adopted_weights.csv`、`score_components.csv`、`data_quality.csv`、`download_failures.csv`、`metadata.json`、`screen_report.md` を保存します。日本株Residualのベンチマーク取得状態は `metadata.json` と `screen_report.md` に明示され、JPベンチマークが取得不能な場合は無言で代替せず停止します。
+
+### Order Plannerの整数株丸め最適化
+
+`alpha_engine_order_planner.py` は、Live Screenerが出力した採用銘柄、順位、Residual Score、Weight、目標金額を変更せず、証券会社画面で人間が確認して手動発注するための買付数量案だけを作ります。自動発注、証券API接続、注文送信は実装していません。
+
+整数株または指定注文単位への変換は、次の2モードを選べます。
+
+- `floor`: 各銘柄の目標金額をバッファ込み価格と注文単位で単純に切り捨てます。従来挙動の監査・比較用です。
+- `target_tracking`: デフォルトかつ実運用推奨です。バッファ込み価格で利用可能買付資金を超えないことを守りながら、追加の1注文単位ごとに実効Weightと目標Weightの二乗誤差が最も小さくなる銘柄へ決定論的に配分します。
+
+主な設定とCLIは以下です。
+
+```python
+ROUNDING_MODE = "target_tracking"   # "floor" or "target_tracking"
+MIN_ONE_UNIT_PER_SELECTED = True
+MAX_RESIDUAL_CASH_PCT_WARNING = 0.03
+```
+
+```bash
+python alpha_engine_order_planner.py \
+  --screen-run-dir /path/to/live_screening_run \
+  --rounding-mode target_tracking \
+  --min-one-unit-per-selected \
+  --max-residual-cash-pct-warning 0.03
+```
+
+`MIN_ONE_UNIT_PER_SELECTED=True` の場合、全採用銘柄について最低1注文単位を買えるか最初に判定します。買える場合は全銘柄へ最低1単位を確保してから追加配分します。買えない場合は一部銘柄を無言で0株にせず、資金追加、`TOTAL_HOLDINGS`削減、端株利用、または `--no-min-one-unit-per-selected` による最低単位強制の解除を求める明示エラーで停止します。
+
+予算が小さすぎる場合は、次のいずれかを検討してください。
+
+- 投入資金を増やす。
+- `TOTAL_HOLDINGS` を減らして採用銘柄数を絞る。
+- 証券会社が対応している場合は端株・単元未満株を別途検討する。
+- 監査目的でのみ `--rounding-mode floor` または `--no-min-one-unit-per-selected` を使い、0株銘柄の警告を確認する。
+
+`buy_order_plan.csv`、`buy_order_summary.csv`、`buy_order_report.md` には、単純切り捨て数量、最適化後数量、実効Weight、Weight乖離、未投資資金、最適化ステップ数、残余現金警告が出力されます。発注直前には証券会社画面で最新価格、注文単位、手数料、税金、為替、必要資金を必ず再確認してください。

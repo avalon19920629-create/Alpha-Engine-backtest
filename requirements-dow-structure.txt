@@ -1,0 +1,2 @@
+-r requirements-dow-study.txt
+matplotlib>=3.9

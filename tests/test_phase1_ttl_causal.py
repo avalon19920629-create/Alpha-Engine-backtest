@@ -77,7 +77,8 @@ def test_day90_failed_stock_keeps_all_precheck_returns():
     assert np.isclose(returns.at[following], .7 * source.at[following, "AAA"])
     first_cycle = selection.loc[selection.trade_date == selection.trade_date.min()]
     assert pd.Timestamp(first_cycle.set_index("ticker").loc["BBB", "exit_date"]) == day90
-    assert not decisions.set_index("ticker").loc["BBB", "renewed"]
+    initial_decisions = decisions.loc[decisions.trade_date == decisions.trade_date.min()]
+    assert not bool(initial_decisions.set_index("ticker").loc["BBB", "renewed"])
 
 
 def test_weekly_failure_only_changes_future_days():

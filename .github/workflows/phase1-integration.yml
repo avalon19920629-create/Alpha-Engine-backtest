@@ -22,13 +22,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-research.txt pytest
+          python -m pip install -r requirements.txt pytest
       - name: Execute existing and new tests
         run: python -m pytest -q --disable-warnings --maxfail=8
-      - name: Upload test report
+      - name: Six-cell R×N smoke audit (synthetic prices)
+        if: always()
+        run: python phase1_rn_compare.py
+      - name: Upload R×N smoke output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: phase1-test-report
-          path: .pytest_cache/v/cache
-          if-no-files-found: ignore
+          name: phase1-rn-demo-artifacts
+          path: phase1_artifacts/
+          if-no-files-found: warn

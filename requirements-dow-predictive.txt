@@ -1,0 +1,2 @@
+-r requirements-dow-structure.txt
+scikit-learn>=1.4,<2.0

@@ -1043,26 +1043,46 @@ def run_ttl_renewal_variant(prices,us,jp,start,end,variant,benchmark_mode=None,d
         p,sc=_select_ttl_candidates(prices,us,jp,screen,variant,benchmark_mode); weights=p.Weight.to_dict() if not p.empty else {}; cycle+=1
         base_end=_next_trade_date(prices.index,t+pd.Timedelta(days=variant["ttl_days"])); base_end=base_end if base_end is not None else prices.index[-1]
         final_end=base_end; active=dict(weights); protocol=variant.get("renewal_protocol")
+        exit_dates={ticker:base_end for ticker in weights}
+
+        def book_returns(first_day,last_day):
+            """Book only returns earned before the next health assessment."""
+            days=out.index[(out.index>=first_day)&(out.index<=last_day)]
+            if len(days):
+                out.loc[days]=rets.reindex(days)[list(active)].mul(pd.Series(active)).sum(axis=1) if active else 0.
+
+        # Day90 and weekly signals use the closing price of the check date.
+        # Apply changes from the following trading session, never retroactively.
+        book_returns(t,base_end)
         if protocol:
             if detail_logs: LOG.info("renewal health check start: %s %s",variant["name"],screen)
-            final_end=_next_trade_date(prices.index,t+pd.Timedelta(days=120)) or prices.index[-1]
+            ext_days=int(variant.get("renewal_extension_days",30))
+            final_end=_next_trade_date(prices.index,t+pd.Timedelta(days=variant["ttl_days"]+ext_days)) or prices.index[-1]
+            exit_dates={ticker:final_end for ticker in weights}
             for ticker,row in p.iterrows():
                 h=_health_row(prices,us,jp,base_end,ticker,row.get("Region"),variant,benchmark_mode); ok=_renewal_pass(protocol,h); decisions.append({"variant":variant["name"],"ticker":ticker,"screen_date":screen,"trade_date":t,"health_check_date":base_end,"protocol":protocol,"renewed":ok,**h})
-                if not ok: active.pop(ticker,None)
+                if not ok: active.pop(ticker,None); exit_dates[ticker]=base_end
             if detail_logs: LOG.info("renewal health check end: %s",variant["name"])
             # weekly degradation only for composite extension; non-pass becomes cash until normal 120-day cycle end
-            if protocol=="composite" and active:
+            segment_start=_next_trade_date(prices.index,base_end+pd.Timedelta(days=1))
+            if protocol=="composite" and active and segment_start is not None:
                 for wd in pd.date_range(base_end,final_end,freq="W-FRI"):
                     check=_next_trade_date(prices.index,wd)
-                    if check is None or check>final_end: continue
+                    if check is None or check<=base_end or check>final_end: continue
+                    book_returns(segment_start,check)
                     for ticker in list(active):
                         region=p.loc[ticker].get("Region"); h=_health_row(prices,us,jp,check,ticker,region,variant,benchmark_mode)
-                        if h["composite_count"]<2: active.pop(ticker,None); events.append({"variant":variant["name"],"date":check,"ticker":ticker,"event":"extension_degradation_end","holding_days":int((check-t).days),**h})
-        hold=out.index[(out.index>=t)&(out.index<=final_end)]
-        if len(hold): out.loc[hold]=rets.reindex(hold)[list(active)].mul(pd.Series(active)).sum(axis=1) if active else 0.
+                        if h["composite_count"]<2:
+                            active.pop(ticker,None); exit_dates[ticker]=check
+                            events.append({"variant":variant["name"],"date":check,"ticker":ticker,"event":"extension_degradation_end","holding_days":int((check-t).days),**h})
+                    segment_start=_next_trade_date(prices.index,check+pd.Timedelta(days=1))
+                    if segment_start is None: break
+            if segment_start is not None and segment_start<=final_end:
+                book_returns(segment_start,final_end)
+
         turns.append({"variant":variant["name"],"screen_date":screen,"trade_date":t,"turnover":sum(abs(weights.get(k,0)-prev.get(k,0)) for k in set(weights)|set(prev))/2,"names_changed":len(set(weights)^set(prev)),"ttl_days":variant["ttl_days"],"renewal_protocol":protocol or "fixed"}); prev=weights
         for ticker,row in p.iterrows():
-            exit_date=final_end if ticker in active else base_end; hd=int((exit_date-t).days); selected.append({"variant":variant["name"],"screen_date":screen,"trade_date":t,"ticker":ticker,"exit_date":exit_date,"holding_days":hd,**row.to_dict()}); holds.append({"variant":variant["name"],"ticker":ticker,"entry_date":t,"exit_date":exit_date,"holding_days":hd,"renewal_protocol":protocol or "fixed"}); trades += [{"variant":variant["name"],"date":t,"ticker":ticker,"action":"BUY","weight":weights.get(ticker,0)},{"variant":variant["name"],"date":exit_date,"ticker":ticker,"action":"SELL","weight":weights.get(ticker,0)}]; events.append({"variant":variant["name"],"date":t,"ticker":ticker,"event":"entry","holding_days":0}); events.append({"variant":variant["name"],"date":exit_date,"ticker":ticker,"event":"exit","holding_days":hd})
+            exit_date=exit_dates[ticker]; hd=int((exit_date-t).days); selected.append({"variant":variant["name"],"screen_date":screen,"trade_date":t,"ticker":ticker,"exit_date":exit_date,"holding_days":hd,**row.to_dict()}); holds.append({"variant":variant["name"],"ticker":ticker,"entry_date":t,"exit_date":exit_date,"holding_days":hd,"renewal_protocol":protocol or "fixed"}); trades += [{"variant":variant["name"],"date":t,"ticker":ticker,"action":"BUY","weight":weights.get(ticker,0)},{"variant":variant["name"],"date":exit_date,"ticker":ticker,"action":"SELL","weight":weights.get(ticker,0)}]; events.append({"variant":variant["name"],"date":t,"ticker":ticker,"event":"entry","holding_days":0}); events.append({"variant":variant["name"],"date":exit_date,"ticker":ticker,"event":"exit","holding_days":hd})
         if not sc.empty:
             tmp=sc.reset_index().rename(columns={"index":"ticker"}); tmp["variant"]=variant["name"]; tmp["date"]=screen; scores_lite.append(tmp.head(max(variant["total_holdings"]*2,12)))
         t=_next_trade_date(prices.index,final_end+pd.Timedelta(days=1))

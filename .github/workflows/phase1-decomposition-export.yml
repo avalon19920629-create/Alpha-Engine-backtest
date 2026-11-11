@@ -1,0 +1,66 @@
+name: Phase 1 Frozen Price Export and Sector References
+on:
+  push:
+    branches: [research/phase1-decomposition-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install pandas pyarrow openpyxl lxml html5lib requests
+      - name: Download prior frozen prices
+        run: |
+          mkdir -p frozen_prices
+          gh run download 43107722015 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase1-rn-realdata-exploratory -D frozen_prices
+          ls -lh frozen_prices/
+      - name: Export portable prices and current sector maps
+        run: |
+          python - <<'PY'
+          import pandas as pd, pathlib, hashlib, json
+          root=pathlib.Path("frozen_prices")
+          src=root/"prices_original.parquet"
+          md=json.loads((root/"metadata.json").read_text())
+          assert hashlib.sha256(src.read_bytes()).hexdigest()==md["price_file_sha256"],"Cache checksum mismatch"
+          price=pd.read_parquet(src)
+          price.to_csv(root/"prices_original.csv.gz",compression="gzip",float_format="%.17g")
+          assert (root/"prices_original.csv.gz").stat().st_size>1000000
+          print("Frozen price validation PASS",price.shape,price.index.min(),price.index.max(),flush=True)
+          status={"price_file_sha256":md["price_file_sha256"],"price_table_shape":list(price.shape)}
+          try:
+              url="https://www.jpx.co.jp/english/markets/statistics-equities/misc/tvdivq0000001vg2-att/data_e.xlsx"
+              jpx=pd.read_excel(url,dtype=str)
+              jpx.to_csv(root/"jpx_current_sectors.csv",index=False)
+              status["jpx_sector_rows"]=len(jpx)
+              status["jpx_sector_columns"]=jpx.columns.tolist()
+          except Exception as e:
+              status["jpx_sector_error"]=str(e)
+          try:
+              us=pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
+              us.to_csv(root/"us_current_sectors.csv",index=False)
+              status["us_sector_rows"]=len(us)
+              status["us_sector_columns"]=us.columns.tolist()
+          except Exception as e:
+              status["us_sector_error"]=str(e)
+          (root/"export_status.json").write_text(json.dumps(status,indent=2,ensure_ascii=False))
+          print(json.dumps(status,ensure_ascii=False),flush=True)
+          PY
+      - name: Upload frozen prices and sector maps
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-frozen-price-csv-and-sector-map
+          path: frozen_prices/
+          retention-days: 30
+          if-no-files-found: warn

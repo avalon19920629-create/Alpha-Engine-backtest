@@ -75,7 +75,8 @@ def test_day90_failed_stock_keeps_all_precheck_returns():
         assert np.isclose(returns.at[day], expected)
     following = prices.index[prices.index.get_loc(day90) + 1]
     assert np.isclose(returns.at[following], .7 * source.at[following, "AAA"])
-    assert pd.Timestamp(selection.set_index("ticker").loc["BBB", "exit_date"]) == day90
+    first_cycle = selection.loc[selection.trade_date == selection.trade_date.min()]
+    assert pd.Timestamp(first_cycle.set_index("ticker").loc["BBB", "exit_date"]) == day90
     assert not decisions.set_index("ticker").loc["BBB", "renewed"]
 
 
@@ -107,7 +108,8 @@ def test_weekly_failure_only_changes_future_days():
         )
     after = prices.index[prices.index.get_loc(check) + 1]
     assert returns.at[after] == 0
-    assert all(pd.to_datetime(selection.exit_date) == check)
+    first_cycle = selection.loc[selection.trade_date == selection.trade_date.min()]
+    assert all(pd.to_datetime(first_cycle.exit_date) == check)
     assert len(events.loc[events.event == "extension_degradation_end"]) == 2
 
 

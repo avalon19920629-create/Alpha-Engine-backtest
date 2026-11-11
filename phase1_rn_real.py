@@ -77,6 +77,10 @@ def main():
         if prices.empty:
             raise ValueError("All live adjusted-price downloads failed.")
         prices = prices.sort_index()
+        # Yahoo/Pandas date indexes may be stored at second resolution, whereas
+        # Parquet reconstructs millisecond resolution. Normalize the index's
+        # unit only (no date or price value changes) before snapshot validation.
+        prices.index = prices.index.astype("datetime64[ns]")
         if prices.index.has_duplicates or prices.columns.has_duplicates:
             raise ValueError("Duplicate dates/columns in downloaded prices.")
         # Keep raw NaN patterns and do not forward-fill the saved data.

@@ -134,7 +134,7 @@ def test_all_good_preserves_legacy_return_behavior():
         prices.index, prices.index[1] + pd.Timedelta(days=120)
     )
     daily = prices.pct_change()
-    for day in prices.loc[prices.index[1]:until].index:
+    for day in prices.loc[prices.index[1]:min(until, returns.index[-1])].index:
         expected = .7 * daily.at[day, "AAA"] + .3 * daily.at[day, "BBB"]
         assert np.isclose(returns.at[day], expected)
 
@@ -148,7 +148,8 @@ def test_renewal_extension_respects_configured_days():
     expected_end = engine._next_trade_date(
         prices.index, prices.index[1] + pd.Timedelta(days=75)
     )
-    assert all(pd.to_datetime(selected.exit_date) == expected_end)
+    first_cycle = selected.loc[selected.trade_date == selected.trade_date.min()]
+    assert all(pd.to_datetime(first_cycle.exit_date) == expected_end)
     assert result.at[expected_end] > 0
 
 

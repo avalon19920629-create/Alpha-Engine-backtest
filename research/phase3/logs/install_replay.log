@@ -1,0 +1,85 @@
+Collecting numpy==2.5.4
+  Downloading numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting pandas==3.1.1
+  Downloading pandas-3.1.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (16 kB)
+Collecting pytest
+  Using cached pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+Collecting pyarrow
+  Using cached pyarrow-26.0.1-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (3.0 kB)
+Collecting exchange-calendars
+  Using cached exchange_calendars-4.13.2-py3-none-any.whl.metadata (26 kB)
+Collecting yfinance
+  Using cached yfinance-1.8.0-py3-none-any.whl.metadata (6.8 kB)
+Requirement already satisfied: python-dateutil>=2.9.0 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from pandas==3.1.1) (4.0.0)
+Collecting iniconfig>=2 (from pytest)
+  Using cached iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+Requirement already satisfied: packaging>=24 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from pytest) (26.3)
+Collecting pluggy<2,>=1.6 (from pytest)
+  Using cached pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+Requirement already satisfied: pygments>=2.15 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from pytest) (2.21.0)
+Collecting pyluach>=2.3.0 (from exchange-calendars)
+  Using cached pyluach-2.3.0-py3-none-any.whl.metadata (4.3 kB)
+Collecting toolz>=1.0.0 (from exchange-calendars)
+  Using cached toolz-1.2.0-py3-none-any.whl.metadata (5.2 kB)
+Requirement already satisfied: tzdata>=2025.2 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from exchange-calendars) (2026.6)
+Collecting korean_lunar_calendar>=0.3.1 (from exchange-calendars)
+  Using cached korean_lunar_calendar-0.4.0-py3-none-any.whl.metadata (6.6 kB)
+Collecting beautifulsoup4>=4.11.1 (from yfinance)
+  Using cached beautifulsoup4-4.15.0-py3-none-any.whl.metadata (3.8 kB)
+Collecting curl_cffi>=0.17 (from yfinance)
+  Using cached curl_cffi-0.17.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (18 kB)
+Requirement already satisfied: lxml>=4.9.0 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from yfinance) (6.1.1)
+Collecting peewee>=3.16.2 (from yfinance)
+  Using cached peewee-4.5.3-py3-none-any.whl.metadata (10 kB)
+Collecting platformdirs>=2.0.0 (from yfinance)
+  Using cached platformdirs-4.14.5-py3-none-any.whl.metadata (5.7 kB)
+Collecting protobuf>=3.19.0 (from yfinance)
+  Using cached protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl.metadata (595 bytes)
+Requirement already satisfied: pytz>=2022.5 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from yfinance) (2026.6)
+Collecting requests>=2.31 (from yfinance)
+  Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Requirement already satisfied: websockets>=13.0 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from yfinance) (16.0)
+Collecting soupsieve>=1.6.1 (from beautifulsoup4>=4.11.1->yfinance)
+  Using cached soupsieve-4.1-py3-none-any.whl.metadata (4.4 kB)
+Requirement already satisfied: typing-extensions>=4.0.0 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from beautifulsoup4>=4.11.1->yfinance) (4.16.0)
+Requirement already satisfied: cffi>=2.1.1 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from curl_cffi>=0.17->yfinance) (2.1.1)
+Requirement already satisfied: certifi>=2026.10.19 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from curl_cffi>=0.17->yfinance) (2026.10.19)
+Requirement already satisfied: charset_normalizer<4,>=2 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from requests>=2.31->yfinance) (3.5.2)
+Requirement already satisfied: idna<4,>=2.5 in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from requests>=2.31->yfinance) (3.18)
+Collecting urllib3<3,>=1.26 (from requests>=2.31->yfinance)
+  Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Requirement already satisfied: pycparser in /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages (from cffi>=2.1.1->curl_cffi>=0.17->yfinance) (3.0)
+Downloading numpy-2.5.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.7/16.7 MB 57.4 MB/s eta 0:00:00
+Downloading pandas-3.1.1-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 48.2 MB/s eta 0:00:00
+Using cached pytest-9.2.0-py3-none-any.whl (411 kB)
+Using cached pyarrow-26.0.1-cp312-cp312-manylinux_2_28_x86_64.whl (55.0 MB)
+Using cached exchange_calendars-4.13.2-py3-none-any.whl (213 kB)
+Using cached yfinance-1.8.0-py3-none-any.whl (158 kB)
+Using cached beautifulsoup4-4.15.0-py3-none-any.whl (109 kB)
+Using cached curl_cffi-0.17.0-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (14.1 MB)
+Using cached iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+Using cached korean_lunar_calendar-0.4.0-py3-none-any.whl (11 kB)
+Using cached peewee-4.5.3-py3-none-any.whl (194 kB)
+Using cached platformdirs-4.14.5-py3-none-any.whl (35 kB)
+Using cached pluggy-1.7.0-py3-none-any.whl (27 kB)
+Using cached protobuf-7.36.2-cp310-abi3-manylinux2014_x86_64.whl (343 kB)
+Using cached pyluach-2.3.0-py3-none-any.whl (25 kB)
+Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+Using cached toolz-1.2.0-py3-none-any.whl (60 kB)
+Using cached soupsieve-4.1-py3-none-any.whl (52 kB)
+Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+Installing collected packages: urllib3, toolz, soupsieve, pyluach, pyarrow, protobuf, pluggy, platformdirs, peewee, numpy, korean_lunar_calendar, iniconfig, requests, pytest, pandas, curl_cffi, beautifulsoup4, yfinance, exchange-calendars
+  Attempting uninstall: numpy
+    Found existing installation: numpy 2.3.5
+    Not uninstalling numpy at /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages, outside environment /workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay
+    Can't uninstall 'numpy'. No files were found to uninstall.
+  Attempting uninstall: pandas
+    Found existing installation: pandas 2.2.3
+    Not uninstalling pandas at /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages, outside environment /workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay
+    Can't uninstall 'pandas'. No files were found to uninstall.
+Successfully installed beautifulsoup4-4.15.0 curl_cffi-0.17.0 exchange-calendars-4.13.2 iniconfig-2.3.1 korean_lunar_calendar-0.4.0 numpy-2.5.4 pandas-3.1.1 peewee-4.5.3 platformdirs-4.14.5 pluggy-1.7.0 protobuf-7.36.2 pyarrow-26.0.1 pyluach-2.3.0 pytest-9.2.0 requests-2.34.2 soupsieve-4.1 toolz-1.2.0 urllib3-2.8.0 yfinance-1.8.0
+
+[notice] A new release of pip is available: 25.0.1 -> 26.3
+[notice] To update, run: python -m pip install --upgrade pip

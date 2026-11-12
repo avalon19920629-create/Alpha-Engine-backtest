@@ -1,0 +1,9 @@
+# Exact analytical versions for the metadata-pinned reproduction.
+# Python used: 3.12.14; original metadata reports Python 3.12.16.
+# Full installed package inventories are in logs/environment_*.txt.
+numpy==2.5.4
+pandas==3.1.1
+pyarrow==26.0.1
+exchange-calendars==4.13.2
+pytest==9.2.0
+yfinance==1.8.0

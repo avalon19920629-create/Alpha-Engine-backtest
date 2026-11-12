@@ -1,0 +1,30 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py:27: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  csv=pd.read_csv(data/'prices_original.csv.gz',index_col=0,parse_dates=True,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py:40: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  selected=pd.read_csv(data/'real_selected_tickers.csv',parse_dates=['screen_date','trade_date'],float_precision='round_trip')
+insufficient_history: APP
+insufficient_history: CEG
+insufficient_history: GEHC
+insufficient_history: GEV
+insufficient_history: Q
+insufficient_history: RDDT
+insufficient_history: HOOD
+insufficient_history: SNDK
+insufficient_history: SOLV
+insufficient_history: VLTO
+legacy R0_N6 complete
+legacy R0_N12 complete
+legacy R60_N6 complete
+legacy R60_N12 complete
+legacy R100_N6 complete
+legacy R100_N12 complete
+Traceback (most recent call last):
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py", line 160, in <module>
+    main()
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py", line 86, in main
+    base=ae.score_universe(p,ts,d);res=ae.compute_residual_momentum_score(p,base.index,d,region,benchmark_mode=mode)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/alpha_engine_backtest.py", line 160, in compute_residual_momentum_score
+    if len(s)>n and bench and bench in hist:
+       ^^^^^^^^
+TypeError: '>' not supported between instances of 'int' and 'str'

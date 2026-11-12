@@ -1,0 +1,51 @@
+{
+  "design_version": "1.0 unchanged",
+  "E30": {
+    "overall": "NOT_PASSED",
+    "reproduction": "PASS_METADATA_PINNED_NUMPY_PANDAS",
+    "execution_alignment": "FAIL_LEGACY_INCLUDES_PRE_ENTRY_RETURN",
+    "PIT_and_terminal_events": "INDETERMINATE_MISSING_INPUTS",
+    "permanent_identity": "INDETERMINATE_MISSING_INPUTS",
+    "signal_future_cutoff": "PASS_SYNTHETIC_AND_SIX_REAL_CHECKS",
+    "market_calendar_snapshot_alignment": "PASS_WITH_EXCHANGE_CALENDARS_4.13.2_NOT_PRIMARY_SOURCE_CERTIFICATION",
+    "portable_unpinned_environment": "FAIL_ACCOUNTING_DEFAULT_DIFFERS",
+    "legacy_metric_max_absolute_error": 3.552713678800501e-15,
+    "legacy_selected_rows": 1026,
+    "legacy_selected_numeric_max_error": 0.0,
+    "protected_original_files_unchanged": 121
+  },
+  "E31": {
+    "overall": "PASS_COMMON_ELIGIBLE_SNAPSHOT_MATHEMATICAL_EQUIVALENCE",
+    "research_rows": 34905,
+    "market_months": 116,
+    "spearman_all": 1.0,
+    "rank_mismatches": 0,
+    "top10_sets_all_equal": true,
+    "top10_boundary_ties": 0,
+    "constant_max_error": 5.467848396278896e-15,
+    "permanent_id_production_tie_resolution_certified": false,
+    "legacy_full_window_rows": 11437,
+    "legacy_full_window_rank_mismatches": 0,
+    "legacy_partial_window_difference_available_window_M0": 21,
+    "legacy_partial_window_difference_base_Composite_Ret": 29,
+    "legacy_beta_independent_comparisons": 34314,
+    "legacy_beta_max_error": 1.865174681370263e-14
+  },
+  "tests": {
+    "existing_pinned": 98,
+    "research_final_pinned": 22,
+    "union_passed": 120
+  },
+  "E32_transition": {
+    "decision": "NO_GO_UNDER_V1_0_FULL_GATE",
+    "executed": false,
+    "prediction_power_claim": false,
+    "required": [
+      "verified permanent IDs and share-class handling",
+      "PIT membership and terminal-event/price provenance",
+      "explicit research entry timing and missing-data policy independent of legacy accounting",
+      "quality-gate rerun after input resolution"
+    ],
+    "note": "Mathematical equivalence does not establish forward predictive power. Existing calendar and raw data subset are sufficient for implementation checks, not full-population certification."
+  }
+}

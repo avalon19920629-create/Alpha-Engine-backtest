@@ -1,0 +1,26 @@
+........................................................................ [ 61%]
+.............................................                            [100%]
+=============================== warnings summary ===============================
+../../../../opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/anyio/pytest_plugin.py:14
+  /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/anyio/pytest_plugin.py:14: PytestRemovedIn10Warning: _pytest.python.CallSpec2 has been renamed to CallSpec.
+  The CallSpec2 alias will be removed in pytest 10.
+  Update imports to use CallSpec instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#callspec2-renamed
+    from _pytest.python import CallSpec2
+
+tests/test_r100_composite_experiment.py::test_demo_r100_outputs_and_resume
+tests/test_r100_composite_experiment.py::test_demo_r100_outputs_and_resume
+tests/test_r100_composite_experiment.py::test_r100_resume_rehydrates_completed_variants_into_final_outputs
+tests/test_r100_composite_experiment.py::test_r100_resume_rehydrates_completed_variants_into_final_outputs
+tests/test_r100_composite_experiment.py::test_r100_frozen_cache_resume_rehydrates_n6_outputs
+tests/test_r100_composite_experiment.py::test_r100_frozen_cache_resume_rehydrates_n6_outputs
+  /workspace/scratch/5814d73181df/alpha-engine-phase3/alpha_engine_backtest.py:1575: Pandas4Warning: The 'lsuffix' and 'rsuffix' keywords in DataFrame.join are deprecated and will be removed in a future version. Use the 'suffixes' keyword instead.
+    summary=summary.join(cost,how='left',rsuffix='_cost') if not cost.empty else summary
+
+tests/test_ttl_composite_forensics.py::test_forensics_reads_source_and_generates_outputs
+tests/test_ttl_composite_forensics.py::test_missing_important_files_warns_but_does_not_crash
+  /workspace/scratch/5814d73181df/alpha-engine-phase3/alpha_engine_backtest.py:1679: Pandas4Warning: The 'lsuffix' and 'rsuffix' keywords in DataFrame.join are deprecated and will be removed in a future version. Use the 'suffixes' keyword instead.
+    if not cost.empty: candidate=candidate.join(cost,rsuffix="_cost",how="left")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+117 passed, 9 warnings in 137.43s (0:02:17)

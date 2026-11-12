@@ -1,0 +1,9 @@
+field,rows,max_abs_error,pass_1e10
+Weight,1026,0.0,True
+Final_Score,1026,0.0,True
+residual_raw,1026,0.0,True
+residual_score,1026,0.0,True
+base_score,1026,0.0,True
+Composite_Ret,1026,0.0,True
+Total_Score,1026,0.0,True
+Volatility,1026,0.0,True

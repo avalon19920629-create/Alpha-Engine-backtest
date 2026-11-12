@@ -1,0 +1,40 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py:27: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  csv=pd.read_csv(data/'prices_original.csv.gz',index_col=0,parse_dates=True,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py:40: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  selected=pd.read_csv(data/'real_selected_tickers.csv',parse_dates=['screen_date','trade_date'],float_precision='round_trip')
+insufficient_history: APP
+insufficient_history: CEG
+insufficient_history: GEHC
+insufficient_history: GEV
+insufficient_history: Q
+insufficient_history: RDDT
+insufficient_history: HOOD
+insufficient_history: SNDK
+insufficient_history: SOLV
+insufficient_history: VLTO
+legacy R0_N6 complete
+legacy R0_N12 complete
+legacy R60_N6 complete
+legacy R60_N12 complete
+legacy R100_N6 complete
+legacy R100_N12 complete
+legacy formulas complete
+{
+  "input_hash": "PASS",
+  "csv_parquet_exact": "PASS",
+  "legacy_metrics_all_match": true,
+  "legacy_selection_set_mismatch_count": 0,
+  "legacy_selection_order_mismatch_count": 0,
+  "legacy_beta_max_error": 1.865174681370263e-14,
+  "research_month_market_count": 116,
+  "research_rows": 34905,
+  "research_all_math_pass": true,
+  "research_constant_error_max": 5.467848396278896e-15,
+  "research_boundary_tie_count": 0,
+  "E32_executed": false,
+  "forward_labels_computed": false,
+  "permanent_company_ids_available": false,
+  "PIT_membership_available_in_inputs": false,
+  "terminal_event_ledger_available": false,
+  "unresolved_data_gate": true
+}

@@ -1,0 +1,28 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py:27: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  csv=pd.read_csv(data/'prices_original.csv.gz',index_col=0,parse_dates=True,float_precision='round_trip')
+Traceback (most recent call last):
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py", line 155, in <module>
+    main()
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/run_audit.py", line 28, in main
+    pd.testing.assert_frame_equal(p,csv,check_exact=True,check_freq=False)
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/util/_decorators.py", line 219, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/util/_decorators.py", line 219, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/_testing/asserters.py", line 1522, in assert_frame_equal
+    assert_index_equal(
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/_testing/asserters.py", line 356, in assert_index_equal
+    _check_types(left, right, obj=obj)
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/_testing/asserters.py", line 350, in _check_types
+    assert_attr_equal("dtype", left, right, obj=obj)
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/_testing/asserters.py", line 589, in assert_attr_equal
+    raise_assert_detail(obj, msg, left_attr, right_attr)
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/_testing/asserters.py", line 782, in raise_assert_detail
+    raise AssertionError(msg)
+AssertionError: DataFrame.index are different
+
+Attribute "dtype" are different
+[left]:  datetime64[ns]
+[right]: datetime64[us]

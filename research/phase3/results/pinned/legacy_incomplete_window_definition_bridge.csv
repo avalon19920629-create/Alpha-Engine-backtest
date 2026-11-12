@@ -1,0 +1,2 @@
+date,region,ticker,full_windows,m0,m1,independent_error,m0_available_windows
+2022-03-31,US,COIN,False,-0.33278185036459934,-0.2510833508247619,0.0,-0.2439114566581084

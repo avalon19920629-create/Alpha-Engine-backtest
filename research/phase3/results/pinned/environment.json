@@ -1,0 +1,24 @@
+{
+  "python": "3.12.14",
+  "numpy": "2.5.4",
+  "pandas": "3.1.1",
+  "exchange_calendars": "4.13.2",
+  "git_head": "075f0985c76c2212552732534d7f3c741270a80d",
+  "design_sha256": "3ce4e352af787ac7d596f823194ab59d25e11d3a76ea129b198a569effd45e86",
+  "legacy_code_sha256": "ed0d6bb6d1d5f90bb6667b119550fdd6bc4b6b59e098716a6cc55ec97a0dee6c",
+  "command": [
+    "research/phase3/run_audit.py",
+    "--data",
+    "../e30_data/phase1-frozen-price-csv-and-sector-map",
+    "--original",
+    "../e30_data/phase1-rn-realdata-20261112",
+    "--out",
+    "research/phase3/results/pinned"
+  ],
+  "frozen_metadata_versions": {
+    "numpy_version": "2.5.4",
+    "pandas_version": "3.1.1",
+    "yfinance_version": "1.8.0",
+    "python_version": "3.12.16"
+  }
+}

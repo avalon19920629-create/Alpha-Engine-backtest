@@ -1,0 +1,26 @@
+{
+  "design": "design_v1.0.md (unchanged user-approved source)",
+  "scope": ["E30", "E31"],
+  "excluded": ["E32", "E33", "E34", "forward prediction labels", "parameter search"],
+  "baseline_commit": "075f0985c76c2212552732534d7f3c741270a80d",
+  "price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "numeric_absolute_tolerance": 1e-10,
+  "rank_and_selection_agreement_required": 1.0,
+  "legacy_reproduction": {
+    "variants": ["R0_N6", "R0_N12", "R60_N6", "R60_N12", "R100_N6", "R100_N12"],
+    "implementation": "import original unmodified functions and reproduce source runner conventions",
+    "environment_comparison": "initial installed numpy/pandas vs metadata-pinned numpy/pandas; neither changes production",
+    "source_runner_branch": "research/phase2-priority-alias-pilot-20261112",
+    "source_runner_commit": "9532f87127a7222dc63d0717e75f79d7c9d34a10"
+  },
+  "research": {
+    "windows": [63, 126, 252],
+    "weights": [1, 2, 3],
+    "calendar": {"US": "XNYS", "JP": "XTKS"},
+    "benchmark": {"US": "SPY", "JP": "1306.T"},
+    "month_ends": "2022-01 through 2026-10 (last complete calendar month in snapshot)",
+    "fill": "none; every one of the 253 local-session prices must be finite and positive",
+    "permanent_ids": "required for certified tie resolution; absent in current inputs",
+    "diagnostic_ticker_sort": "reported separately; never a replacement for verified permanent company IDs"
+  }
+}

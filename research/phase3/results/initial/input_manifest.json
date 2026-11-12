@@ -1,0 +1,28 @@
+{
+  "data": {
+    "universe.json": "9be51aeb16278925e9866c517559e977fd42d2b2097a0b83e3b72833769e76f6",
+    "prices_original.parquet": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+    "prices_original.csv.gz": "8f37d33536e0a8d0b70b7ccee687ac2581acba91504b5eb88727a77ef94c3653",
+    "real_selected_tickers.csv": "05890425df0423b5d380af0f23c26643b3d20909fa608235fbf3d46ad16bfee7",
+    "metadata.json": "d4b7614688bbd1f75e7c3579204cc1c56b1e7516d2da446060825b2f5e94bf3e",
+    "jpx_current_sectors.csv": "7f2fce2ba3595f4c86fdcede78b87d1829e82948f01caaab357fb268fba9dd44",
+    "export_status.json": "a6883541120cf70a402fd13dadd5f6b57ad8ac4a670007fe2558ebcaeac6e81c",
+    "real_six_cell_comparison.csv": "fd0e150079d1b0be1a7772b33bd2bca0617c81d99dfda801e9bbf9c1cf60d1e4"
+  },
+  "original_archive_members": {
+    "universe.json": "9be51aeb16278925e9866c517559e977fd42d2b2097a0b83e3b72833769e76f6",
+    "prices_original.parquet": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+    "real_selected_tickers.csv": "05890425df0423b5d380af0f23c26643b3d20909fa608235fbf3d46ad16bfee7",
+    "metadata.json": "d4b7614688bbd1f75e7c3579204cc1c56b1e7516d2da446060825b2f5e94bf3e",
+    "real_six_cell_comparison.csv": "fd0e150079d1b0be1a7772b33bd2bca0617c81d99dfda801e9bbf9c1cf60d1e4"
+  },
+  "expected_price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "price_hash_pass": true,
+  "cross_bundle_exact": {
+    "universe.json": true,
+    "prices_original.parquet": true,
+    "real_selected_tickers.csv": true,
+    "metadata.json": true,
+    "real_six_cell_comparison.csv": true
+  }
+}

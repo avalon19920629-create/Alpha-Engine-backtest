@@ -1,0 +1,19 @@
+{
+  "input_hash": "PASS",
+  "csv_parquet_exact": "PASS",
+  "legacy_metrics_all_match": false,
+  "legacy_selection_set_mismatch_count": 0,
+  "legacy_selection_order_mismatch_count": 0,
+  "legacy_beta_max_error": 1.865174681370263e-14,
+  "research_month_market_count": 116,
+  "research_rows": 34905,
+  "research_all_math_pass": true,
+  "research_constant_error_max": 5.467848396278896e-15,
+  "research_boundary_tie_count": 0,
+  "E32_executed": false,
+  "forward_labels_computed": false,
+  "permanent_company_ids_available": false,
+  "PIT_membership_available_in_inputs": false,
+  "terminal_event_ledger_available": false,
+  "unresolved_data_gate": true
+}

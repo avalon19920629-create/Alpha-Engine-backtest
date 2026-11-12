@@ -1,0 +1,17 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/finalize_audit.py:14: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  old=pd.read_csv(out/'legacy_signal_rows.csv',parse_dates=['date'],float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/finalize_audit.py:28: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  saved=pd.read_csv(data/'real_selected_tickers.csv',float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3/finalize_audit.py:29: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  rerun=pd.read_csv(out/'legacy_rerun_holdings.csv',float_precision='round_trip')
+insufficient_history: APP
+insufficient_history: CEG
+insufficient_history: FDXF
+insufficient_history: GEHC
+insufficient_history: GEV
+insufficient_history: HONA
+insufficient_history: Q
+insufficient_history: RDDT
+insufficient_history: HOOD
+insufficient_history: SNDK
+{"matched_saved_rows": 1026, "all_selected_numeric_match": true, "available_window_rank_mismatches": 21, "real_future_cutoff_checks": 6}

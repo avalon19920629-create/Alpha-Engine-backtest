@@ -81,9 +81,15 @@ def select_cached(prices, asof, region, us, jp, cfg, cache, benchmark):
         cache[key]=(base,residual)
     base,resid=cache[key]
     variant={"base_weight":1-r/100,"residual_weight":r/100}
-    return engine.combine_residual_score(base,resid,variant).head(n//2)
+    ranked=engine.combine_residual_score(base,resid,variant).copy()
+    # Deterministic tie resolution: 2024-06-28 R60 has an exact APP/NVDA score tie.
+    ranked["tie_symbol"]=ranked.index.astype(str)
+    ranked=ranked.sort_values(
+        ["Final_Score","residual_score","base_score","tie_symbol"],
+        ascending=[False,False,False,True], kind="mergesort")
+    return ranked.head(n//2)
 
-def run_models(prices,us, jp, membership):
+def run_models(prices,us, jp, membership, membership_no_alias):
     returns=pd.DataFrame(index=prices.loc[START:END].index)
     dates=engine.rebalance_dates(prices.index,START,END)
     sigdate=[t for t in dates if (prices.index>t).any()]
@@ -92,7 +98,7 @@ def run_models(prices,us, jp, membership):
     cache={}
     picks=[]
     risks=[]
-    for mode in ("current_2026_pool","historical_members_within_current_pool"):
+    for mode in ("current_2026_pool","historical_members_within_current_pool","historical_with_verified_aliases"):
         for r in RATIOS:
             for n in SIZES:
                 col=f"{mode}_R{r}_N{n}"
@@ -102,8 +108,10 @@ def run_models(prices,us, jp, membership):
                     trade=future[0]
                     next_t=sigdate[i+1] if i+1<len(sigdate) else pd.Timestamp(END)
                     hold=returns.index[(returns.index>=trade)&(returns.index<=next_t)]
+                    members_for_t=(membership[pd.Timestamp(t)] if mode=="historical_with_verified_aliases" else
+                                   membership_no_alias[pd.Timestamp(t)])
                     us_t=us if mode=="current_2026_pool" else [
-                        x for x in us if canonical(x) in membership[pd.Timestamp(t)]
+                        x for x in us if canonical(x) in members_for_t
                     ]
                     pieces=[select_cached(prices,t,"US",us_t,jp,(mode,r,n),cache,benchmark),
                             select_cached(prices,t,"JP",us_t,jp,(mode,r,n),cache,benchmark)]
@@ -152,12 +160,20 @@ def main():
         cache={}
         member={t:membership_asof(t,cache) for t in sig}
         assert pd.Timestamp("2026-06-30") in member
+        verified_aliases=(("BLL","BALL"),("ANTM","ELV"),("ABC","COR"))
+        member_noalias={}
+        for t, matched in member.items():
+            raw=matched.copy()
+            for historical, modern in verified_aliases:
+                if historical in raw:
+                    raw.discard(modern)
+            member_noalias[t]=raw
         # As of June 24, BE excluded; LITE and SNDK included.
         jun=membership_asof("2026-06-24",cache)
         assert "BE" not in jun and "LITE" in jun and "SNDK" in jun
         memrows=[]
         for t in sig:
-            allowed=member[t]
+            allowed=member_noalias[t]
             active=[s for s in us if canonical(s) in allowed]
             memrows.append({
                 "screen_date":str(t.date()),"historical_sp500_member_count":len(allowed),
@@ -166,7 +182,7 @@ def main():
                 "contemporary_pool_not_historical_count":len(us)-len(active),
             })
         pd.DataFrame(memrows).to_csv(ROOT/"historical_membership_coverage.csv",index=False)
-        returns, selected, dates=run_models(prices,us,jp,member)
+        returns, selected, dates=run_models(prices,us,jp,member,member_noalias)
         assert len(dates)==19
         old=oldselected.copy()
         old["screen_date"]=pd.to_datetime(old.screen_date).dt.strftime("%Y-%m-%d")
@@ -191,14 +207,24 @@ def main():
                 var=f"R{r}_N{n}"
                 a=engine.metrics(returns[f"current_2026_pool_{var}"])
                 b=engine.metrics(returns[f"historical_members_within_current_pool_{var}"])
+                c=engine.metrics(returns[f"historical_with_verified_aliases_{var}"])
+                before=selected[(selected["mode"]=="historical_members_within_current_pool")&(selected.variant==var)]
+                after=selected[(selected["mode"]=="historical_with_verified_aliases")&(selected.variant==var)]
+                alias_changed=sum(
+                    set(g.ticker)!=set(after[after.screen_date==date].ticker)
+                    for date,g in before.groupby("screen_date"))
                 base=selected[(selected["mode"]=="current_2026_pool")&(selected.variant==var)&(selected.region=="US")]
                 filtered=selected[(selected["mode"]=="historical_members_within_current_pool")&(selected.variant==var)&(selected.region=="US")]
                 join=base.merge(filtered,on="screen_date",suffixes=("_a","_b"))
                 overlaps=base.groupby("screen_date").apply(lambda g: len(set(g.ticker)&set(filtered[filtered.screen_date==g.name].ticker)), include_groups=False)
-                elig=base.apply(lambda z: canonical(z.ticker) in member[pd.Timestamp(z.screen_date)],axis=1)
+                elig=base.apply(lambda z: canonical(z.ticker) in member_noalias[pd.Timestamp(z.screen_date)],axis=1)
                 audit.append({
                     "variant":var,
                     "original_cagr":a["CAGR"],"filtered_cagr":b["CAGR"],
+                    "alias_corrected_cagr":c["CAGR"],
+                    "alias_effect_on_cagr_pp":100*(c["CAGR"]-b["CAGR"]),
+                    "alias_screen_dates_with_selection_change":int(alias_changed),
+                    "alias_corrected_mdd":c["Max_Drawdown"],
                     "delta_cagr_pp":100*(b["CAGR"]-a["CAGR"]),
                     "original_mdd":a["Max_Drawdown"],"filtered_mdd":b["Max_Drawdown"],
                     "delta_mdd_pp":100*(b["Max_Drawdown"]-a["Max_Drawdown"]),
@@ -225,12 +251,20 @@ def main():
                     bydate.append({
                         "screen_date":str(d.date()),"variant":v,
                         "us_current_picks": ";".join(a.ticker.tolist()),
+                        "us_alias_corrected_picks":";".join(selected[
+                            (selected["mode"]=="historical_with_verified_aliases")&
+                            (selected.variant==v)&
+                            (selected.screen_date==str(d.date()))&
+                            (selected.region=="US")].ticker.tolist()),
                         "us_filtered_picks":";".join(b.ticker.tolist()),
-                        "us_not_yet_member_picks":";".join(t for t in a.ticker if canonical(t) not in member[d]),
+                        "us_not_yet_member_picks":";".join(t for t in a.ticker if canonical(t) not in member_noalias[d]),
                         "overlap":len(set(a.ticker)&set(b.ticker)),
                     })
         pd.DataFrame(bydate).to_csv(ROOT/"change_by_screen_date.csv",index=False)
-        meta["status"]="completed_partial_PIT_correction"
+        meta["status"]="completed_alias_effort_pilot"
+        meta["verified_aliases"]=["BLL->BALL","ANTM->ELV","ABC->COR"]
+        meta["tie_break_rule"]="Final_Score desc, residual_score desc, base_score desc, ticker asc; mergesort"
+        meta["comparison"]="Both historical membership modes are computed with the same frozen stock prices and deterministic tie rules."
         meta["source_year_file_sha256"]={str(y):z[2] for y,z in cache.items()}
         meta["input_price_sha256"]=md["price_file_sha256"]
         meta["pandas"]=pd.__version__

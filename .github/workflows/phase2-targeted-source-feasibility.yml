@@ -1,0 +1,37 @@
+name: Phase 2 Targeted Historical Quote Feasibility
+on:
+  push:
+    branches: [research/phase2-targeted-quote-source-pilot-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  quote_sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install analysis dependencies
+        run: python -m pip install pandas numpy pyarrow
+      - name: Recover frozen Yahoo-adjusted control prices
+        run: |
+          mkdir -p frozen_prices
+          gh run download 43107722015 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase1-rn-realdata-exploratory -D frozen_prices
+          test -s frozen_prices/prices_original.parquet
+      - name: Minimal alternative vendor pilot
+        run: python -u phase2_targeted_source_feasibility.py
+      - name: Archive source validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-targeted-historical-quotes-feasibility
+          path: phase2_targeted_quotes/
+          retention-days: 30
+          if-no-files-found: warn

@@ -1,0 +1,45 @@
+name: Phase 2 Former S&P 500 Constituent Recovery Audit
+on:
+  push:
+    branches: [research/phase2-former-members-recovery-20261112]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  former_members:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install research dependencies
+        run: |
+          python -m pip install -r requirements.txt pyarrow PyYAML
+      - name: Recover frozen price records and membership comparison
+        run: |
+          mkdir -p frozen_prices phase2_reference
+          gh run download 43107722015 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase1-rn-realdata-exploratory -D frozen_prices
+          gh run download 43210030611 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase2-pit-member-restriction-audit -D phase2_reference
+          test -s frozen_prices/prices_original.parquet
+          test -s phase2_reference/historical_membership_sensitivity.csv
+      - name: Pin membership history
+        run: |
+          git clone --quiet https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026.git historical_sp500
+          git -C historical_sp500 checkout --quiet --detach 6ff2a610543d12e56b0290c83ed972c8954b8b41
+          test "$(git -C historical_sp500 rev-parse HEAD)" = "6ff2a610543d12e56b0290c83ed972c8954b8b41"
+      - name: Attempt recovery and calculate remaining historical universe blind spots
+        run: python -u phase2_restore_former_members.py
+      - name: Preserve complete forensic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-former-member-recovery-evidence
+          path: phase2_recovery/
+          if-no-files-found: warn
+          retention-days: 30

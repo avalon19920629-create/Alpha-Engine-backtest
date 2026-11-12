@@ -57,6 +57,14 @@ def membership_asof(d, cache):
     # META was FB prior to June 2022, but Yahoo history for META uses the new name.
     if "FB" in members:
         members.add("META")
+    # Three verified same-security symbol changes, confirmed by SEC/company filings:
+    # BLL -> BALL effective 2022-05-10
+    # ANTM -> ELV effective 2022-06-28
+    # ABC -> COR effective 2023-08-30
+    # Yahoo adjusted-close histories retain the newer symbol and include pre-rename prices.
+    for historical, modern in (("BLL","BALL"),("ANTM","ELV"),("ABC","COR")):
+        if historical in members:
+            members.add(modern)
     if "SATS" in members and d>=pd.Timestamp("2026-06-24"):
         members.add("ECHO")
     assert 450 <= len(members) <= 560, f"implausible membership {d.date()}: {len(members)}"

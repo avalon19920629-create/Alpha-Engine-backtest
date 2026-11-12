@@ -83,12 +83,12 @@ def one_portfolio(prices, prices_ret, us, jp, t, n, r, bmode, memo):
     p["Weight"]=inv/inv.sum()
     return p
 
-def simulate(prices, us, jp, date_list, membership):
+def simulate(prices, us, jp, date_list, membership, original):
     ret=prices.pct_change(fill_method=None)
     out=pd.DataFrame(index=prices.loc[START:END].index)
     selections=[]
     bmode=engine.build_benchmark_modes()["broad_default"]
-    orig_names=set(us)
+    orig_names=set(original)
     for r in RATIOS:
         for n in SIZES:
             k=f"R{r}_N{n}"
@@ -106,7 +106,7 @@ def simulate(prices, us, jp, date_list, membership):
                     selections.append({
                         "variant":k,"screen_date":str(t.date()),"ticker":ticker,
                         "region":p.loc[ticker,"Region"],"weight":float(p.loc[ticker,"Weight"]),
-                        "is_recovered_former_member":ticker not in orig_names
+                        "is_recovered_former_member":(p.loc[ticker,"Region"]=="US" and ticker not in orig_names)
                     })
     return out,pd.DataFrame(selections)
 
@@ -155,7 +155,16 @@ def main():
 
         # yfinance convenience download automatically returns adjusted closes.
         # Avoid a source-price revision for the already-frozen 2026 dataset.
-        downloaded=engine.download_live_prices(extra,START,END,batch_size=45)
+        quote_snapshot=Path("former_quotes_snapshot/downloaded_historical_former_quotes.parquet")
+        if quote_snapshot.exists():
+            snapshot_meta=json.loads(Path("former_quotes_snapshot/metadata.json").read_text())
+            assert sha256(quote_snapshot)==snapshot_meta["restored_price_digest"],"Historical quote snapshot digest mismatch"
+            downloaded=pd.read_parquet(quote_snapshot)
+            info["quote_source"]="verified previous GitHub Actions frozen snapshot"
+            info["quote_source_run"]="43214107412"
+        else:
+            downloaded=engine.download_live_prices(extra,START,END,batch_size=45)
+            info["quote_source"]="fresh yfinance exploration"
         if not downloaded.empty:
             downloaded.index=pd.to_datetime(downloaded.index).tz_localize(None).astype("datetime64[ns]")
             downloaded=downloaded.reindex(frozen.index)
@@ -195,7 +204,7 @@ def main():
         assert len(recovered) <= len(extra)
         assert coverage["former_members_with_recovered_prices"].sum()>=0
         us=original+recovered
-        ret, selected=simulate(data,us,jp,date_list,membership)
+        ret, selected=simulate(data,us,jp,date_list,membership,original)
         old=pd.read_csv("phase2_reference/historical_membership_sensitivity.csv")
         compare=[]
         for r in RATIOS:

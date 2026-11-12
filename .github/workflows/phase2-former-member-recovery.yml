@@ -28,6 +28,11 @@ jobs:
           gh run download 43210030611 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase2-pit-member-restriction-audit -D phase2_reference
           test -s frozen_prices/prices_original.parquet
           test -s phase2_reference/historical_membership_sensitivity.csv
+      - name: Replay immutable historical quotes from previous run
+        run: |
+          mkdir -p former_quotes_snapshot
+          gh run download 43214107412 --repo "avalon19920629-create/Alpha-Engine-backtest" -n phase2-former-member-recovery-evidence -D former_quotes_snapshot
+          test -s former_quotes_snapshot/downloaded_historical_former_quotes.parquet
       - name: Pin membership history
         run: |
           git clone --quiet https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026.git historical_sp500

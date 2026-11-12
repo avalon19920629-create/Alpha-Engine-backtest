@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - research/phase2-historical-membership-audit-20261112
+      - research/phase2-priority-alias-pilot-20261112
   workflow_dispatch:
 permissions:
   contents: read

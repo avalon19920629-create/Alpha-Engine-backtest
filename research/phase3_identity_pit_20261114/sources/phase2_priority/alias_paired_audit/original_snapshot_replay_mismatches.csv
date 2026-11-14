@@ -1,0 +1,5 @@
+model,date,issue,old_only,pilot_only
+R60_N12,2022-12-30,original_snapshot_tie_or_other_selection_mismatch,ACGL,MPC
+R60_N12,2024-09-30,original_snapshot_tie_or_other_selection_mismatch,NFLX,PHM
+R60_N12,full_period,prior_metric_CAGR_mismatch,0.36923389398815676,0.356631049967576
+R60_N12,full_period,prior_metric_Annualized_Volatility_mismatch,0.2722874667517576,0.27222225362212193

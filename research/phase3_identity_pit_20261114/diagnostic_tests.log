@@ -1,0 +1,60 @@
+{
+  "tie_groups": 699,
+  "boundary3": 2,
+  "boundary6": 2,
+  "regional_selections": 228,
+  "permutation_rows_per_environment": 4104,
+  "rules": {
+    "diagnostic_ticker": {
+      "row_order_sensitive_selection_sets": 0,
+      "row_order_sensitive_full_rankings": 0,
+      "distinct_selection_sets_different_from_legacy": 1
+    },
+    "legacy": {
+      "row_order_sensitive_selection_sets": 4,
+      "row_order_sensitive_full_rankings": 76,
+      "distinct_selection_sets_different_from_legacy": 4
+    },
+    "phase2_components": {
+      "row_order_sensitive_selection_sets": 0,
+      "row_order_sensitive_full_rankings": 0,
+      "distinct_selection_sets_different_from_legacy": 2
+    }
+  },
+  "cross_environment_score_max_delta": 0.0,
+  "reverse_universe_set_changes": 0,
+  "reverse_universe_max_score_delta": 0.0,
+  "strict_order_characterization": [
+    {
+      "case": "missing",
+      "raises": true,
+      "result": null,
+      "interpretation": "characterization only; acceptance does not certify identity"
+    },
+    {
+      "case": "duplicate_issuer",
+      "raises": true,
+      "result": null,
+      "interpretation": "characterization only; acceptance does not certify identity"
+    },
+    {
+      "case": "null_id",
+      "raises": false,
+      "result": [
+        "B",
+        "A"
+      ],
+      "interpretation": "characterization only; acceptance does not certify identity"
+    },
+    {
+      "case": "distinct_synthetic",
+      "raises": false,
+      "result": [
+        "A",
+        "B"
+      ],
+      "interpretation": "characterization only; acceptance does not certify identity"
+    }
+  ]
+}
+PASS: cross-environment comparisons, four helper characterizations, protected297

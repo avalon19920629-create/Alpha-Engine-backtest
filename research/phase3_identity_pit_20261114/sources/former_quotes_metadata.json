@@ -1,0 +1,29 @@
+{
+  "status": "completed_partial_quotes_exploration",
+  "reference_run": "43107722015",
+  "historic_membership_source": "shardul0701/SP500-Survivorship-bias-data-2004-2026",
+  "historic_membership_source_sha": "6ff2a610543d12e56b0290c83ed972c8954b8b41",
+  "important_limits": [
+    "This recovers accessible historical members only, NOT all historical firms.",
+    "Yahoo may retain quoted survivors but drop bankrupt/delisted or change company identity for reused symbols.",
+    "No complete corporate action / ticker-identity audit for the additional names.",
+    "Contemporaneous historical membership feed is retrospective community reconstruction.",
+    "Historical Japanese universe is unchanged and not PIT membership controlled.",
+    "The old daily-weight rebalancing accounting and cross-market missing returns are unchanged.",
+    "FX, trading costs, taxes, and bid-ask spread omitted.",
+    "A strong or weak model CAGR remains sample-dependent and not investable expectation."
+  ],
+  "quote_source": "verified previous GitHub Actions frozen snapshot",
+  "quote_source_run": "43214107412",
+  "historical_missing_distinct_ticker_symbols": 102,
+  "quote_eligible_distinct_symbols": 48,
+  "quoted_symbols_unverifiable_identity": 48,
+  "restored_price_digest": "017f8b99ffbae836dba44ce0b361d86aef28fdc4eaf5e779a0403fd49ecaedf8",
+  "original_price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "original_price_columns_unchanged": true,
+  "screen_dates": 19,
+  "date_start": "2022-03-31",
+  "date_end": "2026-09-30",
+  "pandas": "3.1.1",
+  "python": "3.12.16"
+}

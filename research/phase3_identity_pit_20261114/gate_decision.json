@@ -1,0 +1,14 @@
+{
+  "E30": "NOT_PASSED",
+  "E31": "LIMITED_MATHEMATICAL_PASS",
+  "E32": "NO_GO",
+  "P0_1": "prior fixed-sample/synthetic scope only",
+  "P0_2": "prior virtual-common-unit accounting scope only",
+  "P1_3": {
+    "baseline_reproduction": "PASS",
+    "row_order_invariance_legacy": "FAIL",
+    "permanent_identity": "INDETERMINATE"
+  },
+  "P1_4": "INDETERMINATE",
+  "next_action": "STOP; request approval for bounded evidence acquisition and specification work; no E32"
+}

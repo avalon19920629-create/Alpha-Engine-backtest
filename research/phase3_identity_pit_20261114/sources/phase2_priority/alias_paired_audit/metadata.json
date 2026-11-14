@@ -1,0 +1,36 @@
+{
+  "status": "completed_alias_effort_pilot",
+  "source_repo": "shardul0701/SP500-Survivorship-bias-data-2004-2026",
+  "source_commit_pinned": "6ff2a610543d12e56b0290c83ed972c8954b8b41",
+  "price_run_id": 43107722015,
+  "membership_filter": "historical_member_intersection_with_Nov2026_current_US_universe",
+  "what_is_corrected": "contemporary S&P500 members that had not joined at screen date",
+  "what_is_not_corrected": "historical constituents that left index before Nov2026, missing/delisted price histories, Japanese universe historical membership, point-in-time corporate actions, fees, FX and executable trading",
+  "baseline_score": "original code unchanged; R in 0/60/100; N in 6/12, US/JP equal counts, inverse-vol weights, quarterly rebalance, daily fixed weights",
+  "known_ticker_aliases": [
+    "FB -> META",
+    "SATS -> ECHO after 2026-06-24"
+  ],
+  "lookahead_warning": "Historical membership obtained using hindsight for audit only, not a trading feature at 2026-06-24",
+  "verified_aliases": [
+    "BLL->BALL",
+    "ANTM->ELV",
+    "ABC->COR"
+  ],
+  "tie_break_rule": "Final_Score desc, residual_score desc, base_score desc, ticker asc; mergesort",
+  "comparison": "Both historical membership modes are computed with the same frozen stock prices and deterministic tie rules.",
+  "source_year_file_sha256": {
+    "2022": "2510ce714a0ba2f03359b559fda680a80a8a33d76ed4dfc74dbf3c53434b3383",
+    "2023": "23b85752391c87eca55699dcdafab311ecaa9b07a17cddbcf323ac3988b8ae9c",
+    "2024": "6eb2b2f093c1ecdabd732e039c79c5bb91b7d6f4573c72bc4929f48b48720f5b",
+    "2025": "c5dcde6524c235f2fc6c25fb0e784bff7357d926ea8a8456018da94b2f8d4946",
+    "2026": "dcf55179eaedd51cfea1d9a28390a9029dc0b1549490a72c700dba9c68b65cda"
+  },
+  "input_price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "pandas": "3.1.1",
+  "python": "3.12.16",
+  "distinct_screen_dates": 19,
+  "legacy_original_snapshot_replay_mismatch_rows": 4,
+  "validation": "frozen price sha matched; paired original-vs-alias run uses same deterministic tie policy; legacy replay differences disclosed",
+  "research_conclusion_limit": "Any original-snapshot tie mismatch prevents treating pilot current_2026_pool CAGR as unchanged exact replay."
+}

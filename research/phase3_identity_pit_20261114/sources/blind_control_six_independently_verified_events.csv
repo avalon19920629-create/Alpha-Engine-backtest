@@ -1,0 +1,7 @@
+ticker,official_event_date,verified_event_summary,critical_data_action,source_url,classification_done,historical_PIT_price_and_termination_PnL_validated,was_random_blind_sample
+ATVI,2023-10-13,Microsoft買収により現金95USD/株で精算、10/16上場停止,現金合併・終端価格/終端キャッシュフロー,https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2023-588,True,False,True
+DISCK,2022-04-11,Discovery C種株はWBD普通株へ1:1転換,株式交換・旧ティッカーから新証券への企業識別子接続,https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2022-63,True,False,True
+EA,2026-08-04,買収完了を発行会社が公表。非公開化,現金買収・終端キャッシュフロー（契約条件別途要精査）,https://www.ea.com/playtesting/news/ea-announces-completion-of-acquisition,True,False,True
+PXD,2024-05-03,ExxonMobilへの買収完了を発行会社が公表,合併/株式対価・取引日の価格接続,https://corporate.exxonmobil.com/news/news-releases/2024/0503_ExxonMobil-completes-acquisition-of-Pioneer-Natural-Resources,True,False,True
+SEE,2026-04-09,CD&Rによる買収完了、現金42.15USD/株、非上場化,現金買収・終端キャッシュフロー,https://www.sealedair.com/company/media-center/press-releases/sealed-air-announces-completion-of-acquisition-by-cdr,True,False,True
+WBD,2026-10-06,S&P500から除外、買収は同日時点で成立見込みと発表,指数除外日と合併成立日を混同しない,https://press.spglobal.com/2026-10-01-Vylor-Added-to-the-S-P-500-Twilio-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600,True,False,True

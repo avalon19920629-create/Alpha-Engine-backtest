@@ -1,0 +1,20 @@
+{
+  "document_version": "1.0",
+  "status": "DESIGN_ONLY_NOT_IMPLEMENTED",
+  "recommended_reference": "cash_barrier_then_local_close_fixed_units",
+  "baseline": "fc499c873e10f4b4f331f3ec10032a656cd381dc",
+  "unchanged_tracked_files": 253,
+  "old_evidence_hashes": 73,
+  "repair_evidence_hashes": 57,
+  "scope": [
+    "accounting_option_comparison",
+    "specification_proposal",
+    "acceptance_criteria_design"
+  ],
+  "experiments_run": false,
+  "production_changes": false,
+  "implementation_requires_approval": true,
+  "E30": "NOT_PASSED",
+  "E31": "LIMITED_PASS_UNCHANGED",
+  "E32": "NO_GO"
+}

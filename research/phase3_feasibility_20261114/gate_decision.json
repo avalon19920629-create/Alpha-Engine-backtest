@@ -1,0 +1,10 @@
+{
+  "E30": "NOT_PASSED",
+  "E31": "LIMITED_MATHEMATICAL_PASS",
+  "E32": "NO_GO",
+  "legacy_row_order_independence": "FAIL",
+  "old_PIT_count_reconciliation": "PASS",
+  "historical_identity_PIT_terminal_validation": "INDETERMINATE",
+  "recommendation": "C_FREEZE_PENDING_USER_DECISION",
+  "rule_implementation": false
+}

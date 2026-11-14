@@ -1,0 +1,36 @@
+{
+  "repo": "shardul0701/SP500-Survivorship-bias-data-2004-2026",
+  "commit": "6ff2a610543d12e56b0290c83ed972c8954b8b41",
+  "files": [
+    {
+      "local_file": "sources/2022.yaml",
+      "git_path": "src/sp500_ticker_history/sp500-ticker-changes-2022.yaml",
+      "expected_sha256": "2510ce714a0ba2f03359b559fda680a80a8a33d76ed4dfc74dbf3c53434b3383",
+      "actual_sha256": "2510ce714a0ba2f03359b559fda680a80a8a33d76ed4dfc74dbf3c53434b3383"
+    },
+    {
+      "local_file": "sources/2023.yaml",
+      "git_path": "src/sp500_ticker_history/sp500-ticker-changes-2023.yaml",
+      "expected_sha256": "23b85752391c87eca55699dcdafab311ecaa9b07a17cddbcf323ac3988b8ae9c",
+      "actual_sha256": "23b85752391c87eca55699dcdafab311ecaa9b07a17cddbcf323ac3988b8ae9c"
+    },
+    {
+      "local_file": "sources/2024.yaml",
+      "git_path": "src/sp500_ticker_history/sp500-ticker-changes-2024.yaml",
+      "expected_sha256": "6eb2b2f093c1ecdabd732e039c79c5bb91b7d6f4573c72bc4929f48b48720f5b",
+      "actual_sha256": "6eb2b2f093c1ecdabd732e039c79c5bb91b7d6f4573c72bc4929f48b48720f5b"
+    },
+    {
+      "local_file": "sources/2025.yaml",
+      "git_path": "src/sp500_ticker_history/sp500-ticker-changes-2025.yaml",
+      "expected_sha256": "c5dcde6524c235f2fc6c25fb0e784bff7357d926ea8a8456018da94b2f8d4946",
+      "actual_sha256": "c5dcde6524c235f2fc6c25fb0e784bff7357d926ea8a8456018da94b2f8d4946"
+    },
+    {
+      "local_file": "sources/2026.yaml",
+      "git_path": "src/sp500_ticker_history/sp500-ticker-changes-2026.yaml",
+      "expected_sha256": "dcf55179eaedd51cfea1d9a28390a9029dc0b1549490a72c700dba9c68b65cda",
+      "actual_sha256": "dcf55179eaedd51cfea1d9a28390a9029dc0b1549490a72c700dba9c68b65cda"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+PASS protected 379 working bytes and base Git blobs
+PASS 19 disjoint set partitions, 16 residuals, CEG/FB first case; original-ineligible histories under252
+PASS 5 original YAML blob hashes
+PASS 9 event unknowns,29 source records,gates preserved

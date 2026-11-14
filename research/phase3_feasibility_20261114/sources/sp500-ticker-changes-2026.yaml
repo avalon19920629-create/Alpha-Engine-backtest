@@ -1,0 +1,676 @@
+year: 2026
+
+tickers_on_Jan_1:
+  - 'A'
+  - 'AAPL'
+  - 'ABBV'
+  - 'ABNB'
+  - 'ABT'
+  - 'ACGL'
+  - 'ACN'
+  - 'ADBE'
+  - 'ADI'
+  - 'ADM'
+  - 'ADP'
+  - 'ADSK'
+  - 'AEE'
+  - 'AEP'
+  - 'AES'
+  - 'AFL'
+  - 'AIG'
+  - 'AIZ'
+  - 'AJG'
+  - 'AKAM'
+  - 'ALB'
+  - 'ALGN'
+  - 'ALL'
+  - 'ALLE'
+  - 'AMAT'
+  - 'AMCR'
+  - 'AMD'
+  - 'AME'
+  - 'AMGN'
+  - 'AMP'
+  - 'AMT'
+  - 'AMZN'
+  - 'ANET'
+  - 'AON'
+  - 'AOS'
+  - 'APA'
+  - 'APD'
+  - 'APH'
+  - 'APO'
+  - 'APP'
+  - 'APTV'
+  - 'ARE'
+  - 'ARES'
+  - 'ATO'
+  - 'AVB'
+  - 'AVGO'
+  - 'AVY'
+  - 'AWK'
+  - 'AXON'
+  - 'AXP'
+  - 'AZO'
+  - 'BA'
+  - 'BAC'
+  - 'BALL'
+  - 'BAX'
+  - 'BBY'
+  - 'BDX'
+  - 'BEN'
+  - 'BF.B'
+  - 'BG'
+  - 'BIIB'
+  - 'BK'
+  - 'BKNG'
+  - 'BKR'
+  - 'BLDR'
+  - 'BLK'
+  - 'BMY'
+  - 'BR'
+  - 'BRK.B'
+  - 'BRO'
+  - 'BSX'
+  - 'BX'
+  - 'BXP'
+  - 'C'
+  - 'CAG'
+  - 'CAH'
+  - 'CARR'
+  - 'CAT'
+  - 'CB'
+  - 'CBOE'
+  - 'CBRE'
+  - 'CCI'
+  - 'CCL'
+  - 'CDNS'
+  - 'CDW'
+  - 'CEG'
+  - 'CF'
+  - 'CFG'
+  - 'CHD'
+  - 'CHRW'
+  - 'CHTR'
+  - 'CI'
+  - 'CINF'
+  - 'CL'
+  - 'CLX'
+  - 'CMCSA'
+  - 'CME'
+  - 'CMG'
+  - 'CMI'
+  - 'CMS'
+  - 'CNC'
+  - 'CNP'
+  - 'COF'
+  - 'COIN'
+  - 'COO'
+  - 'COP'
+  - 'COR'
+  - 'COST'
+  - 'CPAY'
+  - 'CPB'
+  - 'CPRT'
+  - 'CPT'
+  - 'CRH'
+  - 'CRL'
+  - 'CRM'
+  - 'CRWD'
+  - 'CSCO'
+  - 'CSGP'
+  - 'CSX'
+  - 'CTAS'
+  - 'CTRA'
+  - 'CTSH'
+  - 'CTVA'
+  - 'CVNA'
+  - 'CVS'
+  - 'CVX'
+  - 'D'
+  - 'DAL'
+  - 'DASH'
+  - 'DAY'
+  - 'DD'
+  - 'DDOG'
+  - 'DE'
+  - 'DECK'
+  - 'DELL'
+  - 'DG'
+  - 'DGX'
+  - 'DHI'
+  - 'DHR'
+  - 'DIS'
+  - 'DLR'
+  - 'DLTR'
+  - 'DOC'
+  - 'DOV'
+  - 'DOW'
+  - 'DPZ'
+  - 'DRI'
+  - 'DTE'
+  - 'DUK'
+  - 'DVA'
+  - 'DVN'
+  - 'DXCM'
+  - 'EA'
+  - 'EBAY'
+  - 'ECL'
+  - 'ED'
+  - 'EFX'
+  - 'EG'
+  - 'EIX'
+  - 'EL'
+  - 'ELV'
+  - 'EME'
+  - 'EMR'
+  - 'EOG'
+  - 'EPAM'
+  - 'EQIX'
+  - 'EQR'
+  - 'EQT'
+  - 'ERIE'
+  - 'ES'
+  - 'ESS'
+  - 'ETN'
+  - 'ETR'
+  - 'EVRG'
+  - 'EW'
+  - 'EXC'
+  - 'EXE'
+  - 'EXPD'
+  - 'EXPE'
+  - 'EXR'
+  - 'F'
+  - 'FANG'
+  - 'FAST'
+  - 'FCX'
+  - 'FDS'
+  - 'FDX'
+  - 'FE'
+  - 'FFIV'
+  - 'FICO'
+  - 'FIS'
+  - 'FISV'
+  - 'FITB'
+  - 'FIX'
+  - 'FOX'
+  - 'FOXA'
+  - 'FRT'
+  - 'FSLR'
+  - 'FTNT'
+  - 'FTV'
+  - 'GD'
+  - 'GDDY'
+  - 'GE'
+  - 'GEHC'
+  - 'GEN'
+  - 'GEV'
+  - 'GILD'
+  - 'GIS'
+  - 'GL'
+  - 'GLW'
+  - 'GM'
+  - 'GNRC'
+  - 'GOOG'
+  - 'GOOGL'
+  - 'GPC'
+  - 'GPN'
+  - 'GRMN'
+  - 'GS'
+  - 'GWW'
+  - 'HAL'
+  - 'HAS'
+  - 'HBAN'
+  - 'HCA'
+  - 'HD'
+  - 'HIG'
+  - 'HII'
+  - 'HLT'
+  - 'HOLX'
+  - 'HON'
+  - 'HOOD'
+  - 'HPE'
+  - 'HPQ'
+  - 'HRL'
+  - 'HSIC'
+  - 'HST'
+  - 'HSY'
+  - 'HUBB'
+  - 'HUM'
+  - 'HWM'
+  - 'IBKR'
+  - 'IBM'
+  - 'ICE'
+  - 'IDXX'
+  - 'IEX'
+  - 'IFF'
+  - 'INCY'
+  - 'INTC'
+  - 'INTU'
+  - 'INVH'
+  - 'IP'
+  - 'IQV'
+  - 'IR'
+  - 'IRM'
+  - 'ISRG'
+  - 'IT'
+  - 'ITW'
+  - 'IVZ'
+  - 'J'
+  - 'JBHT'
+  - 'JBL'
+  - 'JCI'
+  - 'JKHY'
+  - 'JNJ'
+  - 'JPM'
+  - 'KDP'
+  - 'KEY'
+  - 'KEYS'
+  - 'KHC'
+  - 'KIM'
+  - 'KKR'
+  - 'KLAC'
+  - 'KMB'
+  - 'KMI'
+  - 'KO'
+  - 'KR'
+  - 'KVUE'
+  - 'L'
+  - 'LDOS'
+  - 'LEN'
+  - 'LH'
+  - 'LHX'
+  - 'LII'
+  - 'LIN'
+  - 'LLY'
+  - 'LMT'
+  - 'LNT'
+  - 'LOW'
+  - 'LRCX'
+  - 'LULU'
+  - 'LUV'
+  - 'LVS'
+  - 'LW'
+  - 'LYB'
+  - 'LYV'
+  - 'MA'
+  - 'MAA'
+  - 'MAR'
+  - 'MAS'
+  - 'MCD'
+  - 'MCHP'
+  - 'MCK'
+  - 'MCO'
+  - 'MDLZ'
+  - 'MDT'
+  - 'MET'
+  - 'META'
+  - 'MGM'
+  - 'MKC'
+  - 'MLM'
+  - 'MMC'
+  - 'MMM'
+  - 'MNST'
+  - 'MO'
+  - 'MOH'
+  - 'MOS'
+  - 'MPC'
+  - 'MPWR'
+  - 'MRK'
+  - 'MRNA'
+  - 'MS'
+  - 'MSCI'
+  - 'MSFT'
+  - 'MSI'
+  - 'MTB'
+  - 'MTCH'
+  - 'MTD'
+  - 'MU'
+  - 'NCLH'
+  - 'NDAQ'
+  - 'NDSN'
+  - 'NEE'
+  - 'NEM'
+  - 'NFLX'
+  - 'NI'
+  - 'NKE'
+  - 'NOC'
+  - 'NOW'
+  - 'NRG'
+  - 'NSC'
+  - 'NTAP'
+  - 'NTRS'
+  - 'NUE'
+  - 'NVDA'
+  - 'NVR'
+  - 'NWS'
+  - 'NWSA'
+  - 'NXPI'
+  - 'O'
+  - 'ODFL'
+  - 'OKE'
+  - 'OMC'
+  - 'ON'
+  - 'ORCL'
+  - 'ORLY'
+  - 'OTIS'
+  - 'OXY'
+  - 'PANW'
+  - 'PAYC'
+  - 'PAYX'
+  - 'PCAR'
+  - 'PCG'
+  - 'PEG'
+  - 'PEP'
+  - 'PFE'
+  - 'PFG'
+  - 'PG'
+  - 'PGR'
+  - 'PH'
+  - 'PHM'
+  - 'PKG'
+  - 'PLD'
+  - 'PLTR'
+  - 'PM'
+  - 'PNC'
+  - 'PNR'
+  - 'PNW'
+  - 'PODD'
+  - 'POOL'
+  - 'PPG'
+  - 'PPL'
+  - 'PRU'
+  - 'PSA'
+  - 'PSKY'
+  - 'PSX'
+  - 'PTC'
+  - 'PWR'
+  - 'PYPL'
+  - 'Q'
+  - 'QCOM'
+  - 'RCL'
+  - 'REG'
+  - 'REGN'
+  - 'RF'
+  - 'RJF'
+  - 'RL'
+  - 'RMD'
+  - 'ROK'
+  - 'ROL'
+  - 'ROP'
+  - 'ROST'
+  - 'RSG'
+  - 'RTX'
+  - 'RVTY'
+  - 'SBAC'
+  - 'SBUX'
+  - 'SCHW'
+  - 'SHW'
+  - 'SJM'
+  - 'SLB'
+  - 'SMCI'
+  - 'SNA'
+  - 'SNDK'
+  - 'SNPS'
+  - 'SO'
+  - 'SOLV'
+  - 'SPG'
+  - 'SPGI'
+  - 'SRE'
+  - 'STE'
+  - 'STLD'
+  - 'STT'
+  - 'STX'
+  - 'STZ'
+  - 'SW'
+  - 'SWK'
+  - 'SWKS'
+  - 'SYF'
+  - 'SYK'
+  - 'SYY'
+  - 'T'
+  - 'TAP'
+  - 'TDG'
+  - 'TDY'
+  - 'TECH'
+  - 'TEL'
+  - 'TER'
+  - 'TFC'
+  - 'TGT'
+  - 'TJX'
+  - 'TKO'
+  - 'TMO'
+  - 'TMUS'
+  - 'TPL'
+  - 'TPR'
+  - 'TRGP'
+  - 'TRMB'
+  - 'TROW'
+  - 'TRV'
+  - 'TSCO'
+  - 'TSLA'
+  - 'TSN'
+  - 'TT'
+  - 'TTD'
+  - 'TTWO'
+  - 'TXN'
+  - 'TXT'
+  - 'TYL'
+  - 'UAL'
+  - 'UBER'
+  - 'UDR'
+  - 'UHS'
+  - 'ULTA'
+  - 'UNH'
+  - 'UNP'
+  - 'UPS'
+  - 'URI'
+  - 'USB'
+  - 'V'
+  - 'VICI'
+  - 'VLO'
+  - 'VLTO'
+  - 'VMC'
+  - 'VRSK'
+  - 'VRSN'
+  - 'VRTX'
+  - 'VST'
+  - 'VTR'
+  - 'VTRS'
+  - 'VZ'
+  - 'WAB'
+  - 'WAT'
+  - 'WBD'
+  - 'WDAY'
+  - 'WDC'
+  - 'WEC'
+  - 'WELL'
+  - 'WFC'
+  - 'WM'
+  - 'WMB'
+  - 'WMT'
+  - 'WRB'
+  - 'WSM'
+  - 'WST'
+  - 'WTW'
+  - 'WY'
+  - 'WYNN'
+  - 'XEL'
+  - 'XOM'
+  - 'XYL'
+  - 'XYZ'
+  - 'YUM'
+  - 'ZBH'
+  - 'ZBRA'
+  - 'ZTS'
+
+changes:
+
+  '2026-01-14':
+    difference:
+      - 'MMC'
+    union:
+      - 'MRSH'
+  '2026-02-09':
+    difference:
+      - DAY
+    union:
+      - CIEN
+    source_url: https://press.spglobal.com/2026-02-04-Ciena-Set-to-Join-S-P-500-Arrowhead-Pharmaceuticals-to-Join-S-P-MidCap-400-ADT-and-OneSpaWorld-Holdings-to-Join-S-P-SmallCap-600
+    source_title: Ciena Set to Join S&P 500; Arrowhead Pharmaceuticals to Join S&P MidCap 400; ADT and OneSpaWorld Holdings to Join S&P SmallCap 600
+    announcement_date: '2026-02-04'
+    confidence_score: 0.99
+  '2026-03-23':
+    difference:
+      - LW
+      - MOH
+      - MTCH
+      - PAYC
+    union:
+      - COHR
+      - LITE
+      - SATS
+      - VRT
+    source_url: https://press.spglobal.com/2026-03-06-Vertiv-Holdings,-Lumentum-Holdings,-Coherent,-and-EchoStar-Set-to-Join-S-P-500-Others-to-Join-S-P-100,-S-P-MidCap-400,-and-S-P-SmallCap-600
+    source_title: Vertiv Holdings, Lumentum Holdings, Coherent, and EchoStar Set to Join S&P 500; Others to Join S&P 100, S&P MidCap 400, and S&P SmallCap 600
+    announcement_date: '2026-03-06'
+    confidence_score: 0.99
+  '2026-04-09':
+    difference:
+      - HOLX
+    union:
+      - CASY
+    source_url: https://press.spglobal.com/2026-04-06-Caseys-General-Stores-Set-to-Join-S-P-500-DigitalOcean-Holdings-to-Join-S-P-MidCap-400-Broadstone-Net-Lease-to-Join-S-P-SmallCap-600
+    source_title: Casey's General Stores Set to Join S&P 500; DigitalOcean Holdings to Join S&P MidCap 400; Broadstone Net Lease to Join S&P SmallCap 600
+    announcement_date: '2026-04-06'
+    confidence_score: 0.99
+  '2026-05-07':
+    difference:
+      - CTRA
+    union:
+      - VEEV
+    source_url: https://press.spglobal.com/2026-04-30-Veeva-Systems-Set-to-Join-S-P-500
+    source_title: Veeva Systems Set to Join S&P 500
+    announcement_date: '2026-04-30'
+    confidence_score: 0.99
+  '2026-05-21':
+    difference:
+      - BK
+    union:
+      - BNY
+    evidence_url: https://www.bny.com/corporate/global/en/about-us/newsroom/press-release/bny-announces-planned-change-of-stock-ticker-symbol-to-bny-130465.html
+    evidence_note: 'Ticker change only: The Bank of New York Mellon Corporation moved its NYSE symbol from BK to BNY effective 2026-05-21 (announced 2026-05-11). Same security and index seat; S&P publishes no press release for a ticker change.'
+    announcement_date: '2026-05-11'
+  '2026-06-01':
+    union:
+      - FDXF
+    source_url: https://press.spglobal.com/2026-05-27-FedEx-Freight-Holding-Company-Set-to-Join-S-P-500-EPAM-Systems-and-Dave-to-Join-S-P-SmallCap-600
+    source_title: FedEx Freight Holding Company Set to Join S&P 500; EPAM Systems and Dave to Join S&P SmallCap 600
+    announcement_date: '2026-05-27'
+    confidence_score: 0.99
+  '2026-06-02':
+    difference:
+      - EPAM
+    source_url: https://press.spglobal.com/2026-05-27-FedEx-Freight-Holding-Company-Set-to-Join-S-P-500-EPAM-Systems-and-Dave-to-Join-S-P-SmallCap-600
+    source_title: FedEx Freight Holding Company Set to Join S&P 500; EPAM Systems and Dave to Join S&P SmallCap 600
+    announcement_date: '2026-05-27'
+    confidence_score: 0.99
+  '2026-06-22':
+    difference:
+      - CPB
+      - POOL
+    union:
+      - FLEX
+      - MRVL
+    source_url: https://press.spglobal.com/2026-06-05-Marvell-Technology-and-Flex-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Marvell Technology and Flex Set to Join S&P 500; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-06-05'
+    confidence_score: 0.99
+  '2026-06-24':
+    difference:
+      - SATS
+    union:
+      - ECHO
+    evidence_url: https://ir.echostar.com/news-releases/news-release-details/echostar-changing-stocker-ticker-sats-echo-marking-companys-next
+    evidence_note: 'Ticker change only: EchoStar Corporation moved its Nasdaq symbol from SATS to ECHO effective 2026-06-24 (announced 2026-06-22). Same security and index seat; S&P publishes no press release for a ticker change.'
+    announcement_date: '2026-06-22'
+  '2026-06-29':
+    union:
+      - HONA
+    source_url: https://press.spglobal.com/2026-06-23-Honeywell-Aerospace-Set-to-Join-S-P-500-S-P-100-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Honeywell Aerospace Set to Join S&P 500 & S&P 100; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-06-23'
+    confidence_score: 0.99
+  '2026-06-30':
+    difference:
+      - CAG
+    source_url: https://press.spglobal.com/2026-06-23-Honeywell-Aerospace-Set-to-Join-S-P-500-S-P-100-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Honeywell Aerospace Set to Join S&P 500 & S&P 100; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-06-23'
+    confidence_score: 0.99
+  '2026-08-05':
+    difference:
+      - EA
+    union:
+      - FERG
+    source_url: https://press.spglobal.com/2026-07-31-Ferguson-Enterprises-Set-to-Join-S-P-500-and-ADI-Global-Distribution-to-Join-S-P-SmallCap-600
+    source_title: Ferguson Enterprises Set to Join S&P 500 and ADI Global Distribution to Join S&P SmallCap 600
+    announcement_date: '2026-07-31'
+    confidence_score: 0.99
+  '2026-08-18':
+    difference:
+      - AVB
+      - EQR
+    union:
+      - RDDT
+      - VMRK
+    source_url: https://press.spglobal.com/2026-08-13-Reddit-Set-to-Join-S-P-500-and-Sun-Communities-to-Join-S-P-MidCap-400
+    source_title: Reddit Set to Join S&P 500 and Sun Communities to Join S&P MidCap 400
+    announcement_date: '2026-08-13'
+    confidence_score: 0.99
+    evidence_url: https://www.sec.gov/Archives/edgar/data/0000906107/000114036126033377/ef20080318_8k.htm
+    evidence_note: 'EQR -> VMRK is a rename on the same date, not covered by the S&P release: on completing its merger with AvalonBay, Equity Residential renamed itself Vivmark Residential and its shares began trading on the NYSE as VMRK on 2026-08-18 (Form 8-K, CIK 906107).'
+  '2026-09-21':
+    difference:
+      - BLDR
+      - TAP
+      - TTD
+    union:
+      - BE
+      - ILMN
+      - P
+    source_url: https://press.spglobal.com/2026-09-04-Bloom-Energy,-Illumina,-and-Everpure-Set-to-Join-S-P-500-Others-to-Join-S-P-100,-S-P-MidCap-400,-and-S-P-SmallCap-600
+    source_title: Bloom Energy, Illumina, and Everpure Set to Join S&P 500; Others to Join S&P 100, S&P MidCap 400, and S&P SmallCap 600
+    announcement_date: '2026-09-04'
+    confidence_score: 0.99
+  '2026-10-01':
+    union:
+      - VYLR
+    source_url: https://press.spglobal.com/2026-10-01-Vylor-Added-to-the-S-P-500-Twilio-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Vylor Added to the S&P 500; Twilio Set to Join S&P 500; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-10-01'
+    confidence_score: 0.99
+  '2026-10-06':
+    difference:
+      - CTVA
+      - PSKY
+      - WBD
+    union:
+      - SKYD
+      - TWLO
+    source_url: https://press.spglobal.com/2026-10-01-Vylor-Added-to-the-S-P-500-Twilio-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Vylor Added to the S&P 500; Twilio Set to Join S&P 500; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-10-01'
+    confidence_score: 0.99
+    evidence_url: https://www.sec.gov/Archives/edgar/data/2041610/000110465926113076/tm2626659d3_8k.htm
+    evidence_note: 'Ticker change only: Paramount Skydance Corporation transferred its Class B common stock from Nasdaq to the NYSE and changed its symbol from PSKY to SKYD effective 2026-10-06. Same security and index seat; the S&P release covers the same-day constituent changes but not this ticker rename.'
+  '2026-11-04':
+    difference:
+      - KVUE
+    union:
+      - OKTA
+    source_url: https://press.spglobal.com/2026-10-30-Okta-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+    source_title: Okta Set to Join S&P 500; Others to Join S&P MidCap 400 and S&P SmallCap 600
+    announcement_date: '2026-10-30'
+    confidence_score: 0.99

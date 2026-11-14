@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "R0_N12",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  },
+  {
+    "variant": "R0_N6",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  },
+  {
+    "variant": "R100_N12",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  },
+  {
+    "variant": "R100_N6",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  },
+  {
+    "variant": "R60_N12",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  },
+  {
+    "variant": "R60_N6",
+    "cutoff": "2024-01-05",
+    "status": "PASS"
+  }
+]

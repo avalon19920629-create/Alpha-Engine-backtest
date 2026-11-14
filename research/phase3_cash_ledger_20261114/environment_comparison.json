@@ -1,0 +1,38 @@
+[
+  {
+    "file": "daily.csv.gz",
+    "rows": 7578,
+    "max_absolute_error": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "events.csv.gz",
+    "rows": 62955,
+    "max_absolute_error": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "metrics.csv",
+    "rows": 6,
+    "max_absolute_error": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "accounting_checks.csv",
+    "rows": 6,
+    "max_absolute_error": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "order_bridge.csv",
+    "rows": 1026,
+    "max_absolute_error": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "legacy_comparison.csv",
+    "rows": 12,
+    "max_absolute_error": 2.220446049250313e-16,
+    "status": "PASS"
+  }
+]

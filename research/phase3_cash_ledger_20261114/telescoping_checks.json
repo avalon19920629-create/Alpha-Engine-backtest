@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "R0_N12",
+    "nav_change_minus_market_pnl": 8.881784197001252e-16,
+    "status": "PASS"
+  },
+  {
+    "variant": "R0_N6",
+    "nav_change_minus_market_pnl": 4.440892098500626e-16,
+    "status": "PASS"
+  },
+  {
+    "variant": "R100_N12",
+    "nav_change_minus_market_pnl": 3.552713678800501e-15,
+    "status": "PASS"
+  },
+  {
+    "variant": "R100_N6",
+    "nav_change_minus_market_pnl": 0.0,
+    "status": "PASS"
+  },
+  {
+    "variant": "R60_N12",
+    "nav_change_minus_market_pnl": 2.6645352591003757e-15,
+    "status": "PASS"
+  },
+  {
+    "variant": "R60_N6",
+    "nav_change_minus_market_pnl": 3.552713678800501e-15,
+    "status": "PASS"
+  }
+]

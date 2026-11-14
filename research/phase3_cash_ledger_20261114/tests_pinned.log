@@ -1,0 +1,28 @@
+test_asynchronous_no_borrowing (test_ledger.LedgerTests.test_asynchronous_no_borrowing) ... /workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/core/series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+  warnings.warn(
+/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/core/series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+  warnings.warn(
+ok
+test_deleted_open_day_blocks (test_ledger.LedgerTests.test_deleted_open_day_blocks) ... ok
+test_dst_calendar_and_close_cutoff (test_ledger.LedgerTests.test_dst_calendar_and_close_cutoff) ... ok
+test_end_pending_orders_remain_cash (test_ledger.LedgerTests.test_end_pending_orders_remain_cash) ... ok
+test_fixed_units_differ_from_daily_weight_rebalancing (test_ledger.LedgerTests.test_fixed_units_differ_from_daily_weight_rebalancing) ... ok
+test_future_prices_and_rows_cannot_change_prefix (test_ledger.LedgerTests.test_future_prices_and_rows_cannot_change_prefix) ... ok
+test_holiday_no_fill_orders (test_ledger.LedgerTests.test_holiday_no_fill_orders) ... ok
+test_initial_nav_in_drawdown (test_ledger.LedgerTests.test_initial_nav_in_drawdown) ... ok
+test_invalid_weight_sum_rejected (test_ledger.LedgerTests.test_invalid_weight_sum_rejected) ... ok
+test_missing_purchase_price_blocks (test_ledger.LedgerTests.test_missing_purchase_price_blocks) ... ok
+test_order_row_permutation (test_ledger.LedgerTests.test_order_row_permutation) ... ok
+test_pre_entry_jump (test_ledger.LedgerTests.test_pre_entry_jump) ... ok
+test_price_scale_invariance (test_ledger.LedgerTests.test_price_scale_invariance) ... ok
+test_reserved_cash_not_double_counted (test_ledger.LedgerTests.test_reserved_cash_not_double_counted) ... ok
+test_sale_return_and_waiting_cash (test_ledger.LedgerTests.test_sale_return_and_waiting_cash) ... ok
+test_unfinished_cycle_blocks_next_signal (test_ledger.LedgerTests.test_unfinished_cycle_blocks_next_signal) ... ok
+test_unknown_held_price_blocks_without_dropping_days (test_ledger.LedgerTests.test_unknown_held_price_blocks_without_dropping_days) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.376s
+
+OK

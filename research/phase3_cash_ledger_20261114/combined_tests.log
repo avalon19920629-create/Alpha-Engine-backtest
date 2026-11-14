@@ -1,0 +1,23 @@
+................................................                         [100%]
+=============================== warnings summary ===============================
+../../../../opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/anyio/pytest_plugin.py:14
+  /opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/site-packages/anyio/pytest_plugin.py:14: PytestRemovedIn10Warning: _pytest.python.CallSpec2 has been renamed to CallSpec.
+  The CallSpec2 alias will be removed in pytest 10.
+  Update imports to use CallSpec instead.
+  See https://docs.pytest.org/en/stable/deprecations.html#callspec2-renamed
+    from _pytest.python import CallSpec2
+
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+research/phase3_cash_ledger_20261114/test_ledger.py::LedgerTests::test_asynchronous_no_borrowing
+  /workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/core/series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+  See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+48 passed, 9 warnings in 0.81s

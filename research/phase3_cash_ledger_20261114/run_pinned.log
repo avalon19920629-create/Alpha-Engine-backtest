@@ -1,0 +1,8 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/run_study.py:47: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  h=pd.read_csv(ROOT/'research/phase3/results/pinned/legacy_rerun_holdings.csv',parse_dates=['screen_date','trade_date'],float_precision='round_trip');assert len(h)==1026
+R0_N12 PASS 0.2076967456116725 oracle_error 8.881784197001252e-16
+R0_N6 PASS 0.2646819590691134 oracle_error 3.552713678800501e-15
+R100_N12 PASS 0.6009859312972279 oracle_error 2.6645352591003757e-14
+R100_N6 PASS 0.8801483971303068 oracle_error 7.105427357601002e-15
+R60_N12 PASS 0.48975175347268873 oracle_error 7.105427357601002e-15
+R60_N6 PASS 0.4628215620218492 oracle_error 2.6645352591003757e-15

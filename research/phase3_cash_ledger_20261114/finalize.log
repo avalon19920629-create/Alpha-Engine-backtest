@@ -1,0 +1,29 @@
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:8: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  a=pd.read_csv(H/'results_pinned'/f,float_precision='round_trip');b=pd.read_csv(H/'results_initial'/f,float_precision='round_trip')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  m=pd.read_csv(H/'results_pinned/metrics.csv');l=pd.read_csv(H/'results_pinned/events.csv.gz',float_precision='round_trip');d=pd.read_csv(H/'results_pinned/daily.csv.gz',float_precision='round_trip');a=pd.read_csv(H/'results_pinned/accounting_checks.csv')
+/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_cash_ledger_20261114/finalize.py:19: Pandas4Warning: The 'float_precision' argument is deprecated. Use the default float precision instead.
+  m=pd.read_csv(H/'results_pinned/metrics.csv');l=pd.read_csv(H/'results_pinned/events.csv.gz',float_precision='round_trip');d=pd.read_csv(H/'results_pinned/daily.csv.gz',float_precision='round_trip');a=pd.read_csv(H/'results_pinned/accounting_checks.csv')
+PASS environment comparison, telescope, chronology, protection; report written

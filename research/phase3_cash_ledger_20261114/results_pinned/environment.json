@@ -1,0 +1,8 @@
+{
+  "python": "3.12.14",
+  "numpy": "2.5.4",
+  "pandas": "3.1.1",
+  "exchange_calendars": "4.13.2",
+  "price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "protocol_sha256": "b46a917ae157a7205e921ab97982d5684931145ec327bb5a913b4d79496b7d5a"
+}

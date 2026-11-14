@@ -1,0 +1,23 @@
+{
+  "preservation": "PASS",
+  "P0_1": {
+    "explicit_environment_portability": "PASS",
+    "legacy_A_B_reproduction": "PASS",
+    "holiday_classification_and_strict_unknown_block": "PASS_SNAPSHOT_ONLY",
+    "full_population_missing_price_certification": "INDETERMINATE"
+  },
+  "P0_2": {
+    "local_close_ownership_tests": "PASS",
+    "independent_scalar_oracle": "PASS",
+    "self_financing_full_portfolio": "INDETERMINATE_REQUIRES_APPROVED_ACCOUNTING_SPEC",
+    "naive_asynchronous_fixed_weight_candidate": "FAIL_GROSS_WEIGHT_EXCEEDS_ONE"
+  },
+  "P1_3": "INDETERMINATE_PERMANENT_IDS",
+  "P1_4": "INDETERMINATE_PIT_AND_TERMINAL_EVENTS",
+  "P2_5": "NOT_PASSED",
+  "E30": "NOT_PASSED",
+  "E31": "LIMITED_MATHEMATICAL_EQUIVALENCE_UNCHANGED",
+  "E32": "NO_GO",
+  "E32_executed": false,
+  "production_changes": false
+}

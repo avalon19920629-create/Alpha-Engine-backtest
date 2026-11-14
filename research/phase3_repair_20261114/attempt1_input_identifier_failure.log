@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_repair_20261114/repair.py", line 121, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/workspace/scratch/5814d73181df/alpha-engine-phase3/research/phase3_repair_20261114/repair.py", line 74, in main
+    assert hashlib.sha256(pp.read_bytes()).hexdigest()=='ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

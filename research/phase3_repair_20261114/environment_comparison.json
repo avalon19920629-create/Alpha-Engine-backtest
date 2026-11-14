@@ -1,0 +1,44 @@
+[
+  {
+    "file": "daily.csv.gz",
+    "rows": 53046,
+    "max_abs_delta": 3.552713678800501e-14,
+    "status": "PASS"
+  },
+  {
+    "file": "metrics.csv",
+    "rows": 42,
+    "max_abs_delta": 3.552713678800501e-14,
+    "status": "PASS"
+  },
+  {
+    "file": "execution_ledger.csv",
+    "rows": 1026,
+    "max_abs_delta": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "missing_summary.csv",
+    "rows": 631,
+    "max_abs_delta": 0.0,
+    "status": "PASS"
+  },
+  {
+    "file": "factorial_daily.csv.gz",
+    "rows": 7578,
+    "max_abs_delta": 2.7755575615628914e-17,
+    "status": "PASS"
+  },
+  {
+    "file": "quarterly_logwealth.csv",
+    "rows": 840,
+    "max_abs_delta": 1.249000902703301e-16,
+    "status": "PASS"
+  },
+  {
+    "file": "suppressed_or_blocked_returns.csv.gz",
+    "rows": 17172,
+    "max_abs_delta": 0.0,
+    "status": "PASS"
+  }
+]

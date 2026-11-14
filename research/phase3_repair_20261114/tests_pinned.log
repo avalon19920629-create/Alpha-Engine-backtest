@@ -1,0 +1,20 @@
+test_asynchronous_gross_exposure_detected (test_repair.AccountingTests.test_asynchronous_gross_exposure_detected) ... /workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/core/series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+  warnings.warn(
+/workspace/scratch/5814d73181df/alpha-engine-phase3/.venv-replay/lib/python3.12/site-packages/pandas/core/series.py:848: Pandas4Warning: Series.values returning an ndarray that drops timezone information for DatetimeTZDtype is deprecated. In a future version, this will return the underlying DatetimeArray instead. Use 'Series.dt.tz_convert(None).to_numpy()' to get a NumPy array of UTC values, or 'Series.array' to get the ExtensionArray.
+See https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#whatsnew-310-deprecations-values for more details.
+  warnings.warn(
+ok
+test_holiday_fill_restores_return (test_repair.AccountingTests.test_holiday_fill_restores_return) ... ok
+test_local_holiday_delay_and_signal_time (test_repair.AccountingTests.test_local_holiday_delay_and_signal_time) ... ok
+test_log_factorial_identity (test_repair.AccountingTests.test_log_factorial_identity) ... ok
+test_no_fill_before_listing_or_after_terminal (test_repair.AccountingTests.test_no_fill_before_listing_or_after_terminal) ... ok
+test_old_owner_keeps_exit_day_new_owner_excluded (test_repair.AccountingTests.test_old_owner_keeps_exit_day_new_owner_excluded) ... ok
+test_open_missing_never_filled (test_repair.AccountingTests.test_open_missing_never_filled) ... ok
+test_pre_entry_jump_excluded (test_repair.AccountingTests.test_pre_entry_jump_excluded) ... ok
+test_zero_holdings_do_not_block (test_repair.AccountingTests.test_zero_holdings_do_not_block) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.692s
+
+OK

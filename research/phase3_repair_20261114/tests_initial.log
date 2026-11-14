@@ -1,0 +1,14 @@
+test_asynchronous_gross_exposure_detected (test_repair.AccountingTests.test_asynchronous_gross_exposure_detected) ... ok
+test_holiday_fill_restores_return (test_repair.AccountingTests.test_holiday_fill_restores_return) ... ok
+test_local_holiday_delay_and_signal_time (test_repair.AccountingTests.test_local_holiday_delay_and_signal_time) ... ok
+test_log_factorial_identity (test_repair.AccountingTests.test_log_factorial_identity) ... ok
+test_no_fill_before_listing_or_after_terminal (test_repair.AccountingTests.test_no_fill_before_listing_or_after_terminal) ... ok
+test_old_owner_keeps_exit_day_new_owner_excluded (test_repair.AccountingTests.test_old_owner_keeps_exit_day_new_owner_excluded) ... ok
+test_open_missing_never_filled (test_repair.AccountingTests.test_open_missing_never_filled) ... ok
+test_pre_entry_jump_excluded (test_repair.AccountingTests.test_pre_entry_jump_excluded) ... ok
+test_zero_holdings_do_not_block (test_repair.AccountingTests.test_zero_holdings_do_not_block) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.609s
+
+OK

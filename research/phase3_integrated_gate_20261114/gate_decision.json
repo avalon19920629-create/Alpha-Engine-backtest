@@ -1,0 +1,17 @@
+{
+  "E30": "NOT_PASSED",
+  "E31": "LIMITED_MATHEMATICAL_PASS",
+  "E32": "NO_GO",
+  "E33": "NOT_EXECUTED_DEPENDENCY_GATE",
+  "E34": "NOT_EXECUTED_DEPENDENCY_GATE",
+  "phase3_predictive_certification": "NOT_ACHIEVED",
+  "current_audit": "COMPLETE_STOP",
+  "phase3_disposition": "ON_HOLD_USER_DECISION",
+  "recommended_option": "B_bounded_feasibility_then_C_if_insufficient",
+  "A_available": false,
+  "gate_criteria_changed": false,
+  "real_accounting_added_to_E30": false,
+  "OOS_added_to_E30": false,
+  "P1_security_id_rule_adopted": false,
+  "new_market_data_acquired": false
+}

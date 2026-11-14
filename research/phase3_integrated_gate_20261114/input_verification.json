@@ -1,0 +1,7 @@
+{
+  "price_sha256": "ab480ba3a1ce8a864aaad9d0dfeb4df16ed115d2bcf5e682e57c96c3de29c67d",
+  "price_recomputed_in_this_audit": false,
+  "price_bytes_rehashed": true,
+  "diagnostic_inputs": "archived score/selection/equivalence/PIT/event/cash-ledger CSVs; paths in diagnose.py",
+  "known_limitation": "audit does not reconstruct original membership YAML or identity/event primary evidence"
+}

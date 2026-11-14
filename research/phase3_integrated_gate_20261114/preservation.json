@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "remote_branch": "80af7f14446c2f33285478ee7ecb48946a6af937",
+  "parent": "27144bc66d8e5ba583c960107c70f4c89b7334a9",
+  "main": "075f0985c76c2212552732534d7f3c741270a80d",
+  "prior_files_unchanged": 297,
+  "protected_now": 354,
+  "new_files": 57,
+  "manifest_counts": {
+    "phase3": 73,
+    "phase3_repair_20261114": 57,
+    "phase3_accounting_design_20261114": 2,
+    "phase3_cash_ledger_20261114": 40,
+    "phase3_identity_pit_20261114": 56
+  }
+}
